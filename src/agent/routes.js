@@ -29,6 +29,7 @@ function ensureSchema() {
       error text
     )`)
       .then(() => q('create index if not exists inquiries_status_idx on inquiries (status, created_at desc)'))
+      .then(() => q('create table if not exists webhook_debug (id serial primary key, created_at timestamptz not null default now(), note text, keys text, body text)'))
       .catch((e) => {
         schemaReady = null;
         throw e;
@@ -42,16 +43,34 @@ const today = () => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0
 const MULTI_UNIT = new Set(['apartments', 'merapi']);
 const link = (url) => (url ? `${url}${url.includes('?') ? '&' : '?'}utm_source=instagram&utm_medium=dm&utm_campaign=agent` : null);
 
+/** First string or number value under a key matching re, searched a few levels deep. */
+function findKey(obj, re, depth = 0) {
+  if (!obj || typeof obj !== 'object' || depth > 3) return null;
+  for (const [k, v] of Object.entries(obj)) {
+    if (re.test(k) && (typeof v === 'string' || typeof v === 'number') && String(v).trim()) return String(v).trim();
+  }
+  for (const v of Object.values(obj)) {
+    if (v && typeof v === 'object') {
+      const r = findKey(v, re, depth + 1);
+      if (r) return r;
+    }
+  }
+  return null;
+}
+
 /** Pull the guest message out of whatever shape the GHL workflow webhook sends. */
 export function extractInbound(b) {
   const m = b.message && typeof b.message === 'object' ? b.message : {};
+  const looksLikeContact = Boolean(b.email || b.phone || b.first_name || b.full_name || b.contact_source || b.location);
+  const channel = String(m.type ?? m.messageType ?? b.channel ?? b.messageType ?? b.message_type ?? '');
   return {
-    contactId: b.contact_id ?? b.contactId ?? b.contact?.id ?? null,
+    contactId: b.contact_id ?? b.contactId ?? b.contact?.id ?? findKey(b, /^contact_?id$/i) ?? (looksLikeContact && typeof b.id === 'string' ? b.id : null),
     contactName: b.full_name ?? b.contact_name ?? b.contact?.name ?? ([b.first_name, b.last_name].filter(Boolean).join(' ') || null),
-    conversationId: b.conversation_id ?? b.conversationId ?? m.conversationId ?? null,
-    messageId: m.id ?? b.message_id ?? b.messageId ?? null,
-    text: String(typeof b.message === 'string' ? b.message : m.body ?? b.body ?? b.text ?? b.customData?.message ?? '').trim(),
-    channel: String(m.type ?? m.messageType ?? b.channel ?? b.messageType ?? '')
+    conversationId: b.conversation_id ?? b.conversationId ?? m.conversationId ?? findKey(b, /^conversation_?id$/i),
+    messageId: m.id ?? b.message_id ?? b.messageId ?? findKey(b, /^message_?id$/i),
+    text: String(typeof b.message === 'string' ? b.message : m.body ?? b.body ?? b.text ?? b.customData?.message ?? findKey(b, /^(message_?body|last_?message|text|body)$/i) ?? '').trim(),
+    // A purely numeric code is not a name, so it is not used to filter.
+    channel: /[a-z]/i.test(channel) ? channel : ''
   };
 }
 
@@ -168,6 +187,10 @@ async function webhook(req, res) {
   if (!dbEnabled()) return res.status(503).json({ error: 'DATABASE_URL is not configured' });
   await ensureSchema();
   const inb = extractInbound(req.body || {});
+  // Keep the last raw webhooks for a while so a changed GHL payload can be diagnosed.
+  q('insert into webhook_debug (note, keys, body) values ($1,$2,$3)', [inb.contactId ? 'ok' : 'no contact id', Object.keys(req.body || {}).join(','), JSON.stringify(req.body || {}).slice(0, 3000)])
+    .then(() => q('delete from webhook_debug where id < (select max(id) - 30 from webhook_debug)'))
+    .catch(() => {});
   if (!inb.contactId) return res.status(400).json({ error: 'contact id missing in the webhook body' });
   if (inb.channel && !/insta|^ig$/i.test(inb.channel)) return res.json({ ok: true, ignored: 'not an Instagram message' });
   const key = inb.messageId || `${inb.contactId}:${sha(inb.text)}:${Math.floor(Date.now() / 120000)}`;
@@ -195,6 +218,11 @@ export function agentPrivate(app, needDb, ah) {
       ? await q('select id, created_at, updated_at, contact_name, guest_message, draft, needs_human, reason, intent, language, status, error from inquiries where status = $1 order by id desc limit $2', [req.query.status, limit])
       : await q('select id, created_at, updated_at, contact_name, guest_message, draft, needs_human, reason, intent, language, status, error from inquiries order by id desc limit $1', [limit]);
     res.json({ inquiries: rows });
+  }));
+
+  app.get('/agent/debug', needDb, ah(async (_req, res) => {
+    await ensureSchema();
+    res.json({ webhooks: await q('select id, created_at, note, keys, body from webhook_debug order by id desc limit 5') });
   }));
 
   app.get('/agent/inquiries/:id', needDb, ah(async (req, res) => {
