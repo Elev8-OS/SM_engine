@@ -78,8 +78,8 @@ export async function endCard({ width, height, title, subtitle, cta }) {
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
 
-/** Flat text band for a 4:5 carousel slide, drawn at the bottom. */
-export async function slideOverlay({ width, height, headline, sub, cta, darken }) {
+/** Flat text band for a feed or story slide. bottomInset lifts the band above the app UI zone. */
+export async function slideOverlay({ width, height, headline, sub, cta, darken, bottomInset = 0 }) {
   const fs = 64;
   const subFs = 34;
   const lines = wrap(headline, fs, width - 120);
@@ -87,7 +87,7 @@ export async function slideOverlay({ width, height, headline, sub, cta, darken }
   const blockH = lines.length * fs * 1.18 + (subLines.length ? subLines.length * subFs * 1.3 + 16 : 0) + (cta ? 120 : 0);
   const padB = 64;
   const bandH = Math.round(blockH + padB + 56);
-  const bandTop = height - bandH;
+  const bandTop = height - bandH - bottomInset;
   let y = bandTop + 56 + fs * 0.9;
   let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">`;
   if (darken) svg += `<rect width="${width}" height="${height}" fill="rgba(0,0,0,0.45)"/>`;
