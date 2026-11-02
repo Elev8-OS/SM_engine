@@ -131,8 +131,13 @@ app.put('/properties/:key', needDb, ah(async (req, res) => {
 
 // Photo catalog: upsert analysed photos. Usage counters are kept on update.
 app.post('/catalog/upsert', needDb, ah(async (req, res) => {
-  const { propertyKey, items } = req.body || {};
-  if (!propertyKey || !Array.isArray(items) || !items.length || items.length > 500) throw new HttpError(400, 'propertyKey and 1 to 500 items are required');
+  const body = req.body || {};
+  const { propertyKey } = body;
+  // JSON with items[], or form fields for a single photo (what Make sends safely)
+  const items = Array.isArray(body.items) ? body.items : body.fileId ? [body] : null;
+  if (!propertyKey || !items || !items.length || items.length > 500) throw new HttpError(400, 'propertyKey and 1 to 500 items are required');
+  const bool = (v) => v === true || String(v).toLowerCase() === 'true';
+  const int = (v) => (v === undefined || v === null || v === '' || Number.isNaN(Number(v)) ? null : Math.round(Number(v)));
   const prop = await q('select key from properties where key = $1', [propertyKey]);
   if (!prop.length) throw new HttpError(404, `Unknown property: ${propertyKey}`);
   let n = 0;
@@ -144,7 +149,7 @@ app.post('/catalog/upsert', needDb, ah(async (req, res) => {
        on conflict (file_id) do update set name = excluded.name, web_url = excluded.web_url, size_bytes = excluded.size_bytes, room = excluded.room, motif = excluded.motif,
          time_of_day = excluded.time_of_day, quality = excluded.quality, issues = excluded.issues, has_people = excluded.has_people, orientation = excluded.orientation,
          reel_fit = excluded.reel_fit, analyzed_at = now()`,
-      [i.fileId, propertyKey, i.name ?? null, i.webUrl ?? null, i.sizeBytes ?? null, i.room ?? null, i.motif ?? null, i.timeOfDay ?? null, i.quality ?? null, i.issues ?? null, !!i.hasPeople, i.orientation ?? null, !!i.reelFit]
+      [i.fileId, propertyKey, i.name ?? null, i.webUrl ?? null, int(i.sizeBytes), i.room ?? null, i.motif ?? null, i.timeOfDay ?? null, int(i.quality), i.issues ?? null, bool(i.hasPeople), i.orientation ?? null, bool(i.reelFit)]
     );
     n++;
   }
