@@ -6,7 +6,8 @@ import express from 'express';
 import { HttpError, createLimiter } from './util.js';
 import { renderReel, validateReel } from './reel.js';
 import { renderCarousel, validateCarousel } from './carousel.js';
-import { storageEnabled, uploadFile } from './storage.js';
+import { storageEnabled, uploadFile, openObject } from './storage.js';
+import { verifyMedia } from './media.js';
 import { dbEnabled, migrate, q } from './db.js';
 import { seedProperties } from './seed.js';
 import { planNext } from './planner.js';
@@ -20,6 +21,26 @@ app.use(express.urlencoded({ extended: false, limit: '5mb' }));
 const limit = createLimiter(Number(process.env.MAX_CONCURRENT) || 1);
 
 app.get('/health', (_req, res) => res.json({ ok: true, storage: storageEnabled(), database: dbEnabled(), ghl: ghlConfigured() }));
+
+// Signed public media links (no API key): the signature in the link is the access control.
+app.get('/m/:id/:name', async (req, res, next) => {
+  try {
+    const { id, name } = req.params;
+    if (!/^\d+$/.test(id) || !/^[\w.-]+$/.test(name) || !verifyMedia(id, name, req.query.exp, req.query.sig)) {
+      return res.status(403).json({ error: 'Invalid or expired link' });
+    }
+    const o = await openObject(`posts/${id}/${name}`, req.get('range'));
+    res.status(o.status);
+    res.set({ 'Content-Type': o.contentType || 'application/octet-stream', 'Accept-Ranges': 'bytes', 'Cache-Control': 'private, max-age=3600' });
+    if (o.contentLength != null) res.set('Content-Length', String(o.contentLength));
+    if (o.contentRange) res.set('Content-Range', o.contentRange);
+    o.stream.on('error', next);
+    o.stream.pipe(res);
+  } catch (e) {
+    if (e.name === 'NoSuchKey' || e.code === 'ENOENT') return res.status(404).json({ error: 'Not found' });
+    next(e);
+  }
+});
 
 app.use((req, res, next) => {
   const key = process.env.API_KEY;

@@ -6,6 +6,7 @@ import { HttpError } from './util.js';
 import { renderReel } from './reel.js';
 import { renderCarousel } from './carousel.js';
 import { putFile, presign } from './storage.js';
+import { mediaUrl } from './media.js';
 import { createDrafts, scheduleDrafts, ghlConfigured } from './ghl.js';
 
 const SITE = 'elevate-villas.com'; // shown as plain text, never as a button
@@ -120,7 +121,8 @@ export async function renderPost(id, rawBody) {
 
 export async function mediaUrls(post) {
   const keys = post.media?.keys || [];
-  return Promise.all(keys.map((k) => presign(k)));
+  // Own signed links (valid a year) when the public address is known, otherwise the bucket's 7 day links.
+  return Promise.all(keys.map(async (k) => mediaUrl(k) || (await presign(k))));
 }
 
 export async function postView(id) {
