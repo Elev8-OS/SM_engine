@@ -31,26 +31,30 @@ function textBlock({ lines, fontSize, x, y, weight = 600, fill = BRAND.white, an
 }
 
 /**
- * Transparent text overlay for a reel clip. Text sits inside the safe zone
- * (top 250 px and bottom 340 px are kept free for the app UI).
+ * Transparent text overlay for a reel clip. Text sits inside the Instagram safe zone
+ * (see the comment below for the areas kept free).
  */
 export async function reelOverlay({ width, height, headline, sub, big = false }) {
-  const fs = big ? 84 : 66;
-  const subFs = 38;
-  const lines = wrap(headline, fs, width - 160);
-  const subLines = sub ? wrap(sub, subFs, width - 200) : [];
+  // Instagram draws profile, caption and buttons over a reel: keep text out of the top 14 %,
+  // the bottom 36 % and a right-hand strip for the like/comment/share icons.
+  const fs = big ? 76 : 60;
+  const subFs = 36;
+  const textW = width - 300; // text column 780 px wide, shifted left of centre to clear the icon strip
+  const cx = (width - 140) / 2;
+  const lines = wrap(headline, fs, textW);
+  const subLines = sub ? wrap(sub, subFs, textW - 20) : [];
   const blockH = lines.length * fs * 1.18 + (subLines.length ? subLines.length * subFs * 1.3 + 24 : 0);
   const padY = 44;
-  const bottomLimit = height - 340;
+  const bottomLimit = height - 700;
   const bandBottom = bottomLimit;
   const bandTop = bandBottom - blockH - padY * 2;
   let y = bandTop + padY + fs * 0.9;
   let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">`;
   svg += `<rect x="0" y="${Math.round(bandTop)}" width="${width}" height="${Math.round(bandBottom - bandTop)}" fill="rgba(0,0,0,0.5)"/>`;
-  svg += textBlock({ lines, fontSize: fs, x: width / 2, y });
+  svg += textBlock({ lines, fontSize: fs, x: cx, y });
   if (subLines.length) {
     y += (lines.length - 1) * fs * 1.18 + fs * 0.35 + subFs * 1.2;
-    svg += textBlock({ lines: subLines, fontSize: subFs, x: width / 2, y, weight: 400, lineHeight: 1.3 });
+    svg += textBlock({ lines: subLines, fontSize: subFs, x: cx, y, weight: 400, lineHeight: 1.3 });
   }
   svg += '</svg>';
   return sharp(Buffer.from(svg)).png().toBuffer();
@@ -78,7 +82,7 @@ export async function endCard({ width, height, title, subtitle, cta }) {
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
 
-/** Flat text band for a feed or story slide. bottomInset lifts the band above the app UI zone. */
+/** Flat text band for a 4:5 carousel slide, drawn at the bottom. */
 export async function slideOverlay({ width, height, headline, sub, cta, darken, bottomInset = 0 }) {
   const fs = 64;
   const subFs = 34;
