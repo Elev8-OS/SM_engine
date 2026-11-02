@@ -8,6 +8,7 @@ import { renderCarousel } from './carousel.js';
 import { putFile, presign } from './storage.js';
 import { createDrafts, scheduleDrafts, ghlConfigured } from './ghl.js';
 
+const SITE = 'elevate-villas.com'; // shown as plain text, never as a button
 const BANNED = ['leverage', 'synergy', 'synergies', 'ecosystem', 'world-class', 'best-in-class', 'innovative solution', 'unlock', 'seamless', 'actualize'];
 
 /** Cheap guards on the generated copy. Returns a list of warnings, never throws. */
@@ -91,7 +92,7 @@ export async function renderPost(id, rawBody) {
         hook: copy.hook || copy.lines[0]?.headline || 'Villa in Bali',
         subhook: copy.subhook,
         photos: ordered.map((p, i) => ({ url: p.url, base64: p.base64, video: p.video, line: copy.lines[i]?.headline, sub: copy.lines[i]?.sub })),
-        endCard: { title: end.title || 'Book direct. Best rate guaranteed.', subtitle: end.subtitle, cta: end.cta || 'Link in bio' },
+        endCard: { title: end.title || 'Book direct. Best rate guaranteed.', subtitle: end.subtitle, cta: SITE, hint: 'Link in bio' },
         music: body.music
       };
       const r = await renderReel(job, dir);
@@ -100,7 +101,7 @@ export async function renderPost(id, rawBody) {
     } else {
       const slides = ordered.map((p, i) => ({ photo: p, headline: copy.lines[i]?.headline || copy.hook || 'The R Villas Bali', sub: copy.lines[i]?.sub }));
       if (post.format === 'carousel') {
-        slides.push({ photo: ordered[0], headline: end.title || 'Book direct. Best rate guaranteed.', sub: end.subtitle, cta: end.cta || 'Link in bio', darken: true });
+        slides.push({ photo: ordered[0], headline: end.title || 'Book direct. Best rate guaranteed.', sub: end.subtitle, cta: SITE, darken: true });
       }
       const files = await renderCarousel({ format: post.format === 'story' ? 'story' : 'feed', slides }, dir);
       for (const f of files) keys.push(await putFile(f.file, `posts/${id}/${f.name}`, 'image/jpeg'));
