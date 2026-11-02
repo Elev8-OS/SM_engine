@@ -119,7 +119,7 @@ export async function renderReel(job, dir) {
   // end card (last clip, no crossfade out)
   const ec = job.endCard || {};
   const cardPng = path.join(dir, 'card.png');
-  await fs.writeFile(cardPng, await endCard({ width: W, height: H, title: ec.title || 'Book direct. Best rate guaranteed.', subtitle: ec.subtitle, cta: ec.cta || 'Link in bio' }));
+  await fs.writeFile(cardPng, await endCard({ width: W, height: H, title: ec.title || 'Book direct. Best rate guaranteed.', subtitle: ec.subtitle, cta: ec.cta || 'elevate-villas.com', hint: ec.hint }));
   const cardOut = path.join(dir, 'card.mp4');
   await run('ffmpeg', ['-y', '-loop', '1', '-framerate', String(FPS), '-t', endSec.toFixed(3), '-i', cardPng, '-vf', `format=yuv420p,fps=${FPS}`, '-an', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', cardOut]);
   clips.push({ file: cardOut, dur: endSec });

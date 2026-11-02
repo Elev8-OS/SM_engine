@@ -60,7 +60,7 @@ export async function reelOverlay({ width, height, headline, sub, big = false })
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
 
-export async function endCard({ width, height, title, subtitle, cta }) {
+export async function endCard({ width, height, title, subtitle, cta, hint }) {
   const tFs = 76;
   const tLines = wrap(title || 'Book direct.', tFs, width - 160);
   const sLines = subtitle ? wrap(subtitle, 40, width - 200) : [];
@@ -73,10 +73,10 @@ export async function endCard({ width, height, title, subtitle, cta }) {
     svg += textBlock({ lines: sLines, fontSize: 40, x: width / 2, y, weight: 400, lineHeight: 1.3 });
     y += sLines.length * 52 + 30;
   }
+  // Plain text, not a button: nothing on an Instagram post is tappable, so it must not look tappable.
   if (cta) {
-    const bw = Math.min(width - 200, 120 + cta.length * 26);
-    svg += `<rect x="${Math.round((width - bw) / 2)}" y="${Math.round(y)}" width="${bw}" height="96" rx="48" fill="${BRAND.yellow}"/>`;
-    svg += `<text x="${width / 2}" y="${Math.round(y + 63)}" font-family="${FONT}" font-size="42" font-weight="600" fill="#000000" text-anchor="middle">${esc(cta)}</text>`;
+    svg += `<text x="${width / 2}" y="${Math.round(y + 40)}" font-family="${FONT}" font-size="56" font-weight="700" fill="${BRAND.yellow}" text-anchor="middle">${esc(cta)}</text>`;
+    if (hint) svg += `<text x="${width / 2}" y="${Math.round(y + 104)}" font-family="${FONT}" font-size="36" font-weight="400" fill="#BDBDBD" text-anchor="middle">${esc(hint)}</text>`;
   }
   svg += '</svg>';
   return sharp(Buffer.from(svg)).png().toBuffer();
@@ -104,10 +104,7 @@ export async function slideOverlay({ width, height, headline, sub, cta, darken, 
     y += (subLines.length - 1) * subFs * 1.3;
   }
   if (cta) {
-    const bw = 110 + cta.length * 24;
-    const by = y + 34;
-    svg += `<rect x="60" y="${Math.round(by)}" width="${bw}" height="76" rx="38" fill="${BRAND.yellow}"/>`;
-    svg += `<text x="${60 + bw / 2}" y="${Math.round(by + 50)}" font-family="${FONT}" font-size="34" font-weight="600" fill="#000000" text-anchor="middle">${esc(cta)}</text>`;
+    svg += `<text x="60" y="${Math.round(y + 80)}" font-family="${FONT}" font-size="46" font-weight="700" fill="${BRAND.yellow}" text-anchor="start">${esc(cta)}</text>`;
   }
   svg += '</svg>';
   return sharp(Buffer.from(svg)).png().toBuffer();
