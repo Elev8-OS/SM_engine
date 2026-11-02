@@ -91,3 +91,18 @@ export function createLimiter(max) {
       next();
     });
 }
+
+/** Video sources are restricted to SharePoint download links (or hosts in VIDEO_HOSTS). */
+export function assertVideoUrl(url) {
+  let u;
+  try {
+    u = new URL(url);
+  } catch {
+    throw new HttpError(400, 'Invalid video URL');
+  }
+  if (u.protocol !== 'https:') throw new HttpError(400, 'Video URLs must use https');
+  const allowed = (process.env.VIDEO_HOSTS || 'sharepoint.com').split(',').map((h) => h.trim()).filter(Boolean);
+  if (!allowed.some((h) => u.hostname === h || u.hostname.endsWith('.' + h))) {
+    throw new HttpError(400, `Video host not allowed: ${u.hostname}`);
+  }
+}

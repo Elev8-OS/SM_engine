@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import sharp from 'sharp';
-import { run, loadImage, HttpError } from './util.js';
+import { run, loadImage, assertVideoUrl, HttpError } from './util.js';
 import { reelOverlay, endCard } from './text.js';
 
 const W = 1080;
@@ -35,6 +35,11 @@ export function validateReel(job) {
   if (typeof job.hook !== 'string' || !job.hook.trim()) throw new HttpError(400, 'hook is required');
   for (const p of job.photos) {
     if (p.line != null && String(p.line).length > 80) throw new HttpError(400, 'Photo lines must be 80 characters or less');
+    if (p.video) {
+      assertVideoUrl(p.video.url);
+      const start = Number(p.video.start ?? 0);
+      if (!(start >= 0) || start > 36000) throw new HttpError(400, 'video.start must be between 0 and 36000 seconds');
+    }
   }
   if (String(job.hook).length > 80) throw new HttpError(400, 'hook must be 80 characters or less');
 }
@@ -69,9 +74,6 @@ export async function renderReel(job, dir) {
   const clips = []; // { file, dur }
   for (let i = 0; i < job.photos.length; i++) {
     const p = job.photos[i];
-    const buf = await loadImage(p);
-    const base = path.join(dir, `base${i}.jpg`);
-    const iw = await preparePhoto(buf, base);
     const headline = i === 0 ? job.hook : p.line;
     const overlay = headline ? path.join(dir, `text${i}.png`) : null;
     if (overlay) {
@@ -79,12 +81,25 @@ export async function renderReel(job, dir) {
     }
     const dur = i === 0 ? hookSec : per;
     const T = (dur + XF).toFixed(3);
-    const travel = Math.min(iw - W, 640);
-    const x0 = Math.round((iw - W - travel) / 2);
-    const prog = i % 2 === 0 ? `(1-cos(PI*t/${T}))/2` : `1-(1-cos(PI*t/${T}))/2`;
     const out = path.join(dir, `clip${i}.mp4`);
-    const args = ['-y', '-loop', '1', '-framerate', String(FPS), '-t', T, '-i', base];
-    let graph = `[0:v]crop=${W}:${H}:x='${x0}+${travel}*(${prog})':y=0[b];`;
+    const args = ['-y'];
+    let graph;
+    if (p.video) {
+      // Video segment: seek first (fast, uses HTTP range requests), cut to 9:16, no sound.
+      const start = Number(p.video.start ?? 0);
+      const focus = Math.min(1, Math.max(0, Number(p.video.focus ?? 0.5)));
+      args.push('-ss', start.toFixed(2), '-t', T, '-i', p.video.url || p.video.path);
+      graph = `[0:v]crop=w='min(iw,ih*9/16)':h=ih:x='(iw-min(iw,ih*9/16))*${focus}':y=0,scale=${W}:${H}:flags=lanczos,setsar=1,fps=${FPS}[b];`;
+    } else {
+      const buf = await loadImage(p);
+      const base = path.join(dir, `base${i}.jpg`);
+      const iw = await preparePhoto(buf, base);
+      const travel = Math.min(iw - W, 640);
+      const x0 = Math.round((iw - W - travel) / 2);
+      const prog = i % 2 === 0 ? `(1-cos(PI*t/${T}))/2` : `1-(1-cos(PI*t/${T}))/2`;
+      args.push('-loop', '1', '-framerate', String(FPS), '-t', T, '-i', base);
+      graph = `[0:v]crop=${W}:${H}:x='${x0}+${travel}*(${prog})':y=0[b];`;
+    }
     if (overlay) {
       args.push('-loop', '1', '-framerate', String(FPS), '-t', T, '-i', overlay);
       graph += '[b][1:v]overlay=0:0:format=auto,';
@@ -92,7 +107,7 @@ export async function renderReel(job, dir) {
       graph += '[b]';
     }
     graph += `format=yuv420p,fps=${FPS}[v]`;
-    args.push('-filter_complex', graph, '-map', '[v]', '-an', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', out);
+    args.push('-filter_complex', graph, '-map', '[v]', '-an', '-t', T, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', out);
     await run('ffmpeg', args);
     clips.push({ file: out, dur });
   }
