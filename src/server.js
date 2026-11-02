@@ -15,6 +15,7 @@ import { renderPost, listPosts, postView, draftToGhl, setStatus } from './posts.
 import { ghlConfigured, listAccounts, listUsers, getStatistics } from './ghl.js';
 import { goHandler, clickStats } from './links.js';
 import { agentPublic, agentPrivate } from './agent/routes.js';
+import { insightsRoutes } from './insights.js';
 
 const app = express();
 app.use(express.json({ limit: '60mb' }));
@@ -199,6 +200,7 @@ app.get('/stats/social', needGhlBase, ah(async (_req, res) => res.json(await get
 app.get('/stats/clicks', needDb, ah(async (req, res) => res.json(await clickStats(req.query.days))));
 
 agentPrivate(app, needDb, ah);
+insightsRoutes(app, needDb, ah);
 
 app.use((err, _req, res, _next) => {
   if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
