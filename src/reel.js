@@ -67,8 +67,8 @@ async function preparePhoto(buf, out) {
 }
 
 export async function renderReel(job, dir) {
-  const per = Number(job.secondsPerPhoto) > 0 ? Math.min(Number(job.secondsPerPhoto), 6) : 2.7;
-  const hookSec = Number(job.hookSeconds) > 0 ? Math.min(Number(job.hookSeconds), 6) : 2.5;
+  const per = Number(job.secondsPerPhoto) > 0 ? Math.min(Number(job.secondsPerPhoto), 6) : 3.2;
+  const hookSec = Number(job.hookSeconds) > 0 ? Math.min(Number(job.hookSeconds), 6) : 3;
   const endSec = Number(job.endSeconds) > 0 ? Math.min(Number(job.endSeconds), 8) : 3;
 
   const clips = []; // { file, dur }
