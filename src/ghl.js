@@ -117,7 +117,7 @@ export async function listAccounts() {
   const res = await fetch(`${BASE}/social-media-posting/${process.env.GHL_LOCATION_ID}/accounts`, { headers: headers(), signal: AbortSignal.timeout(30000) });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) return { ok: false, status: res.status, response: json };
-  const accounts = (json?.results?.accounts || []).map((a) => ({ id: a.id, platform: a.platform, type: a.type, name: a.name, active: a.active, expired: a.isExpired }));
+  const accounts = (json?.results?.accounts || []).map((a) => ({ id: a.id, platform: a.platform, type: a.type, name: a.name, active: a.active, expired: a.isExpired, ignore_messages: a.facebookIgnoreMessages, connection: a.connectionSource, missing_scopes: a.meta?.missingScopes, can_read_stats: a.hasStatisticsPermissions }));
   return { ok: true, accounts };
 }
 
