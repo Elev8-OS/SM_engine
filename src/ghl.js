@@ -19,8 +19,23 @@ const headers = () => ({
   Accept: 'application/json'
 });
 
-function summaryFor(platform, copy) {
+const SITE_URL = 'https://www.elevate-villas.com';
+
+/** Booking link with tracking. One property: its own page, otherwise the portfolio page. */
+export function bookingUrl(post, platform) {
+  const props = post.plan?.properties || [];
+  const base = props.length === 1 && props[0].url ? props[0].url : SITE_URL;
+  const campaign = `${post.pillar || 'post'}_${post.format || 'post'}_${post.id}`.replace(/[^a-z0-9_]/gi, '');
+  return `${base}${base.includes('?') ? '&' : '?'}utm_source=${platform}&utm_medium=social&utm_campaign=${campaign}`;
+}
+
+function summaryFor(platform, copy, post) {
   const caption = (copy.captions && copy.captions[platform]) || (copy.captions && copy.captions.instagram) || '';
+  if (platform === 'facebook') {
+    // Links in Facebook text are clickable. Remove any "link in bio" sentence and append the real link.
+    const clean = caption.replace(/[^.!?\n]*link in (the )?bio[^.!?\n]*[.!?]?/gi, '').replace(/\n{3,}/g, '\n\n').trim();
+    return `${clean}\n\nBook direct: ${bookingUrl(post, 'facebook')}`;
+  }
   if (platform === 'instagram' && Array.isArray(copy.hashtags) && copy.hashtags.length) {
     return `${caption}\n\n${copy.hashtags.map((h) => '#' + String(h).replace(/^#/, '')).join(' ')}`;
   }
@@ -43,7 +58,7 @@ export async function createDrafts(post, mediaUrls) {
     }
     const body = {
       accountIds: [accountId],
-      summary: summaryFor(platform, post.copy),
+      summary: summaryFor(platform, post.copy, post),
       media: mediaUrls.map((url) => ({ url, type: isVideo ? 'video/mp4' : 'image/jpeg' })),
       status: 'draft',
       type,

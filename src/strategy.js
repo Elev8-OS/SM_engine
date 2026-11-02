@@ -23,7 +23,7 @@ export const RULES = [
   'Use only the facts provided for the properties and areas. Never invent amenities, distances, prices, discounts or review quotes.',
   'Headlines on slides: 3 to 8 words, no more than 70 characters.',
   'Never claim a number of bedrooms or guests that is not in the facts.',
-  'The call to action is always to book direct on the website via the link in bio.'
+  'The call to action is to book direct on the website. Instagram and TikTok captions end with "Link in bio". Facebook captions never mention the bio and never contain a URL: the booking link is added automatically.'
 ];
 
 export function isoWeekday(d) {
@@ -50,8 +50,8 @@ export const COPY_SCHEMA = {
   hook: 'Reel only: opening line, max 60 characters',
   subhook: 'Reel only: small line under the hook, optional',
   lines: 'One entry per photo in the given order: { headline (max 70 characters), sub (optional, max 60) }. For the first photo of a reel use the hook instead.',
-  endCard: '{ title, subtitle, cta } for the last slide or reel end card. cta is "Link in bio"',
-  captions: '{ instagram, facebook, tiktok }. Instagram: 2 to 4 short paragraphs, ends with the call to action. Facebook: slightly longer and may name the booking website. TikTok: one short hook line plus one sentence.',
+  endCard: '{ title, subtitle } for the last slide or reel end card. The website address is added automatically',
+  captions: '{ instagram, facebook, tiktok }. Instagram: 2 to 4 short paragraphs, ends with the call to action. Facebook: slightly longer, no URL and no mention of the bio. TikTok: one short hook line plus one sentence.',
   hashtags: 'Array of 5 to 8 relevant hashtags for Instagram, without the # sign',
   altTexts: 'Array with one alt text per photo, max 120 characters each, describing only what the photo shows'
 };
