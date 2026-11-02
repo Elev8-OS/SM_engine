@@ -1,4 +1,5 @@
 import { q } from './db.js';
+import { HttpError } from './util.js';
 import { slotFor, PILLARS, RULES, COPY_SCHEMA } from './strategy.js';
 import { AREAS } from './seed.js';
 
@@ -88,15 +89,25 @@ function choose(candidates, pillar, format) {
 
 /**
  * Plan the post for a date. Returns the existing post when the day is already planned,
- * so a rerun never creates duplicates.
+ * so a rerun never creates duplicates. With propertyKey the post is planned for that villa
+ * instead of the next one in the rotation.
  */
-export async function planNext(date) {
+export async function planNext(date, { propertyKey } = {}) {
   const slot = slotFor(date);
   const planDate = date.toISOString().slice(0, 10);
   const existing = await q("select * from posts where plan_date = $1 and format = $2 and status <> 'rejected' limit 1", [planDate, slot.format]);
-  if (existing.length) return toPlan(existing[0]);
+  if (existing.length) {
+    if (propertyKey && existing[0].property_key !== propertyKey) {
+      throw new HttpError(409, `${planDate} is already planned for ${existing[0].property_key} (post ${existing[0].id}). Pick another date or reject that post.`);
+    }
+    return toPlan(existing[0]);
+  }
 
-  const candidates = await loadCandidates();
+  let candidates = await loadCandidates();
+  if (propertyKey) {
+    candidates = candidates.filter((c) => c.key === propertyKey);
+    if (!candidates.length) throw new HttpError(404, `No active property '${propertyKey}' with approved photos`);
+  }
   let pillar = slot.pillar;
   let picked = choose(candidates, pillar, slot.format);
   if (!picked && pillar !== 'villa_spotlight') {

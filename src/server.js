@@ -118,11 +118,13 @@ const needDb = (_req, _res, next) => (dbEnabled() ? next() : next(new HttpError(
 const ah = (fn) => (req, res, next) => fn(req, res).catch(next);
 
 // Plan the post for a day (default: today in Bali). Safe to call twice, it returns the same plan.
+// Optional propertyKey plans it for that villa instead of the next one in the rotation.
 app.post('/plan/next', needDb, ah(async (req, res) => {
   const base = req.body?.date ? new Date(`${req.body.date}T00:00:00Z`) : new Date(Date.now() + 8 * 3600 * 1000);
   if (Number.isNaN(base.getTime())) throw new HttpError(400, 'date must be YYYY-MM-DD');
   const day = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate()));
-  res.json(await planNext(day));
+  const propertyKey = req.body?.propertyKey ? String(req.body.propertyKey) : undefined;
+  res.json(await planNext(day, { propertyKey }));
 }));
 
 app.get('/posts', needDb, ah(async (req, res) => res.json({ posts: await listPosts({ status: req.query.status, limit: Math.min(Number(req.query.limit) || 50, 200) }) })));
