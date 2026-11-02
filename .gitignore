@@ -1,0 +1,6 @@
+node_modules
+.env
+tmp
+out
+*.mp4
+assets/music/*.mp3
