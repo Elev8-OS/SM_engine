@@ -11,7 +11,8 @@ export function priceIds() {
 }
 
 export const agentConfig = () => ({
-  enabled: process.env.AGENT_ENABLED === 'true',
+  // Tolerant on purpose: True, "true" or a stray space must not keep the agent off.
+  enabled: /^(true|1|yes|on)$/i.test(String(process.env.AGENT_ENABLED || '').replace(/["'\s]/g, '')),
   webhook_secret_set: Boolean(process.env.AGENT_WEBHOOK_SECRET),
   anthropic_key_set: Boolean(process.env.ANTHROPIC_API_KEY),
   elev8_token_set: Boolean(process.env.ELEV8_MCP_TOKEN),
