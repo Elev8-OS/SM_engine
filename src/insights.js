@@ -1,4 +1,5 @@
 import { q } from './db.js';
+import { audienceRoutes } from './audience.js';
 
 // Per-post Instagram numbers from the Meta Graph API (Instagram API with Facebook Login).
 // Needs META_ACCESS_TOKEN (a Page access token) and META_IG_USER_ID (the Instagram business account id).
@@ -187,7 +188,9 @@ export async function metaAccounts() {
   }
 }
 
+// Analytics routes: per-post Instagram numbers, Meta account helper and the audience planner.
 export function insightsRoutes(app, needDb, ah) {
   app.get('/stats/posts', needDb, ah(async (req, res) => res.json(await postInsights({ refresh: req.query.refresh === '1' }))));
+  audienceRoutes(app, needDb, ah);
   app.get('/stats/meta/accounts', ah(async (_req, res) => res.json(await metaAccounts())));
 }
