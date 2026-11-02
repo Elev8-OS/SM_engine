@@ -102,7 +102,11 @@ export async function renderReel(job, dir) {
     }
     if (overlay) {
       args.push('-loop', '1', '-framerate', String(FPS), '-t', T, '-i', overlay);
-      graph += '[b][1:v]overlay=0:0:format=auto,';
+      // Text is hidden while clips crossfade (first XF seconds of a clip and its last XF seconds),
+      // so the text of two clips is never on screen at the same time.
+      const tIn = i === 0 ? 0.15 : XF + 0.05;
+      const tOut = Math.max(tIn + 0.5, dur - 0.2);
+      graph += `[1:v]format=rgba,fade=t=in:st=${tIn.toFixed(2)}:d=0.25:alpha=1,fade=t=out:st=${tOut.toFixed(2)}:d=0.2:alpha=1[t];[b][t]overlay=0:0:format=auto,`;
     } else {
       graph += '[b]';
     }
