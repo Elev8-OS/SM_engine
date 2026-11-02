@@ -61,11 +61,12 @@ function findKey(obj, re, depth = 0) {
 /** Pull the guest message out of whatever shape the GHL workflow webhook sends. */
 export function extractInbound(b) {
   const m = b.message && typeof b.message === 'object' ? b.message : {};
-  const looksLikeContact = Boolean(b.email || b.phone || b.first_name || b.full_name || b.contact_source || b.location);
+  // GHL's default 'Customer Replied' webhook sends only { id, name, email, phone }: id is the contact id, the text comes from the thread.
+  const idIsContact = typeof b.id === 'string' && /^[A-Za-z0-9]{16,32}$/.test(b.id) && !b.messageId;
   const channel = String(m.type ?? m.messageType ?? b.channel ?? b.messageType ?? b.message_type ?? '');
   return {
-    contactId: b.contact_id ?? b.contactId ?? b.contact?.id ?? findKey(b, /^contact_?id$/i) ?? (looksLikeContact && typeof b.id === 'string' ? b.id : null),
-    contactName: b.full_name ?? b.contact_name ?? b.contact?.name ?? ([b.first_name, b.last_name].filter(Boolean).join(' ') || null),
+    contactId: b.contact_id ?? b.contactId ?? b.contact?.id ?? findKey(b, /^contact_?id$/i) ?? (idIsContact ? b.id : null),
+    contactName: b.full_name ?? b.contact_name ?? b.contact?.name ?? ([b.first_name, b.last_name].filter(Boolean).join(' ') || b.name || null),
     conversationId: b.conversation_id ?? b.conversationId ?? m.conversationId ?? findKey(b, /^conversation_?id$/i),
     messageId: m.id ?? b.message_id ?? b.messageId ?? findKey(b, /^message_?id$/i),
     text: String(typeof b.message === 'string' ? b.message : m.body ?? b.body ?? b.text ?? b.customData?.message ?? findKey(b, /^(message_?body|last_?message|text|body)$/i) ?? '').trim(),
@@ -193,7 +194,7 @@ async function webhook(req, res) {
     .catch(() => {});
   if (!inb.contactId) return res.status(400).json({ error: 'contact id missing in the webhook body' });
   if (inb.channel && !/insta|^ig$/i.test(inb.channel)) return res.json({ ok: true, ignored: 'not an Instagram message' });
-  const key = inb.messageId || `${inb.contactId}:${sha(inb.text)}:${Math.floor(Date.now() / 120000)}`;
+  const key = inb.messageId || `${inb.contactId}:${sha(inb.text)}:${Math.floor(Date.now() / 60000)}`;
   const rows = await q(
     `insert into inquiries (dedupe_key, contact_id, contact_name, conversation_id, guest_message, status) values ($1,$2,$3,$4,$5,'new') on conflict (dedupe_key) do nothing returning id`,
     [key, inb.contactId, inb.contactName, inb.conversationId, inb.text || null]
