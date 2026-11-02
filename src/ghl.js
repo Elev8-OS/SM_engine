@@ -76,17 +76,31 @@ export async function createDrafts(post, mediaUrls) {
   return results;
 }
 
-/** Set drafts to scheduled at a given time. Edits each stored GHL post. */
-export async function scheduleDrafts(post, scheduledForIso) {
+/**
+ * Set drafts to scheduled at a given time. GHL wants the complete post again on an edit
+ * (accounts, media, text), not just the new status.
+ */
+export async function scheduleDrafts(post, scheduledForIso, mediaUrls) {
+  const acc = accounts() || {};
+  const isVideo = post.media?.type === 'video';
+  const type = post.format === 'reel' ? 'reel' : post.format === 'story' ? 'story' : 'post';
   const results = {};
   for (const [platform, r] of Object.entries(post.ghl || {})) {
-    if (!r || !r.id) continue;
-    const type = post.format === 'reel' ? 'reel' : post.format === 'story' ? 'story' : 'post';
+    if (!r || !r.id || !acc[platform]) continue;
+    const body = {
+      accountIds: [acc[platform]],
+      summary: summaryFor(platform, post.copy, post),
+      media: mediaUrls.map((url) => ({ url, type: isVideo ? 'video/mp4' : 'image/jpeg' })),
+      status: 'scheduled',
+      scheduleDate: scheduledForIso,
+      type,
+      userId: process.env.GHL_USER_ID
+    };
     try {
       const res = await fetch(`${BASE}/social-media-posting/${process.env.GHL_LOCATION_ID}/posts/${r.id}`, {
         method: 'PUT',
         headers: headers(),
-        body: JSON.stringify({ status: 'scheduled', scheduleDate: scheduledForIso, type, userId: process.env.GHL_USER_ID }),
+        body: JSON.stringify(body),
         signal: AbortSignal.timeout(60000)
       });
       const json = await res.json().catch(() => ({}));

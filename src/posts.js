@@ -154,7 +154,7 @@ export async function setStatus(id, { status, feedback, scheduledFor }) {
   if (status === 'scheduled') {
     if (!scheduledFor || Number.isNaN(Date.parse(scheduledFor))) throw new HttpError(400, 'scheduledFor must be an ISO date');
     if (!ghlConfigured()) throw new HttpError(409, 'GHL is not configured yet');
-    const res = await scheduleDrafts(post, new Date(scheduledFor).toISOString());
+    const res = await scheduleDrafts(post, new Date(scheduledFor).toISOString(), await mediaUrls(post));
     if (!Object.values(res).some((r) => r.ok)) throw new HttpError(502, `GHL did not accept the schedule: ${JSON.stringify(res).slice(0, 400)}`);
     ghl = { ...post.ghl, schedule: res };
   }
