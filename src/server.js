@@ -12,7 +12,8 @@ import { dbEnabled, migrate, q } from './db.js';
 import { seedProperties } from './seed.js';
 import { planNext } from './planner.js';
 import { renderPost, listPosts, postView, draftToGhl, setStatus } from './posts.js';
-import { ghlConfigured, listAccounts, listUsers } from './ghl.js';
+import { ghlConfigured, listAccounts, listUsers, getStatistics } from './ghl.js';
+import { goHandler, clickStats } from './links.js';
 
 const app = express();
 app.use(express.json({ limit: '60mb' }));
@@ -41,6 +42,9 @@ app.get('/m/:id/:name', async (req, res, next) => {
     next(e);
   }
 });
+
+// Public tracked link for the bio and ads: records the click, then redirects with UTM parameters.
+app.get('/go/:id', (req, res, next) => goHandler(req, res).catch(next));
 
 app.use((req, res, next) => {
   const key = process.env.API_KEY;
@@ -186,6 +190,10 @@ app.get('/catalog/stats', needDb, ah(async (_req, res) => {
 const needGhlBase = (_req, _res, next) => (process.env.GHL_API_TOKEN && process.env.GHL_LOCATION_ID ? next() : next(new HttpError(409, 'Set GHL_API_TOKEN and GHL_LOCATION_ID first')));
 app.get('/ghl/accounts', needGhlBase, ah(async (_req, res) => res.json(await listAccounts())));
 app.get('/ghl/users', needGhlBase, ah(async (_req, res) => res.json(await listUsers())));
+
+// Numbers for the dashboard: GHL social analytics and tracked link clicks.
+app.get('/stats/social', needGhlBase, ah(async (_req, res) => res.json(await getStatistics())));
+app.get('/stats/clicks', needDb, ah(async (req, res) => res.json(await clickStats(req.query.days))));
 
 app.use((err, _req, res, _next) => {
   if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });

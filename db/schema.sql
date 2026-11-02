@@ -53,3 +53,14 @@ create table if not exists posts (
 );
 create index if not exists posts_status_idx on posts (status, created_at desc);
 create unique index if not exists posts_plan_day_idx on posts (plan_date, format, pillar) where status <> 'rejected';
+
+create table if not exists clicks (
+  id bigserial primary key,
+  created_at timestamptz not null default now(),
+  post_id int references posts(id) on delete set null,
+  source text,
+  is_bot boolean not null default false,
+  user_agent text
+);
+create index if not exists clicks_post_idx on clicks (post_id, created_at desc);
+create index if not exists clicks_day_idx on clicks (created_at desc);

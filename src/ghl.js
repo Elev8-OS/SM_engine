@@ -129,3 +129,23 @@ export async function listUsers() {
   const users = (json?.users || []).map((u) => ({ id: u.id, name: u.name || [u.firstName, u.lastName].filter(Boolean).join(' '), email: u.email }));
   return { ok: true, users };
 }
+
+/** Analytics of the connected accounts from GHL (last 7 days against the 7 days before). Raw GHL answer inside data. */
+export async function getStatistics() {
+  const loc = process.env.GHL_LOCATION_ID;
+  const accRes = await fetch(`${BASE}/social-media-posting/${loc}/accounts`, { headers: headers(), signal: AbortSignal.timeout(30000) });
+  const accJson = await accRes.json().catch(() => ({}));
+  if (!accRes.ok) return { ok: false, status: accRes.status, response: accJson };
+  const accs = (accJson?.results?.accounts || []).filter((a) => a.active && !a.isExpired);
+  const profileIds = [...new Set(accs.map((a) => a.profileId).filter(Boolean))];
+  const platforms = [...new Set(accs.map((a) => a.platform).filter(Boolean))];
+  if (!profileIds.length) return { ok: false, status: 404, response: { error: 'No active social accounts' } };
+  const res = await fetch(`${BASE}/social-media-posting/statistics?locationId=${encodeURIComponent(loc)}`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({ profileIds, platforms }),
+    signal: AbortSignal.timeout(60000)
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, platforms, data: res.ok ? data : undefined, response: res.ok ? undefined : data };
+}
