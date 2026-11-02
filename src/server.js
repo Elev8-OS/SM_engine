@@ -15,6 +15,7 @@ import { ghlConfigured } from './ghl.js';
 
 const app = express();
 app.use(express.json({ limit: '60mb' }));
+app.use(express.urlencoded({ extended: false, limit: '5mb' }));
 
 const limit = createLimiter(Number(process.env.MAX_CONCURRENT) || 1);
 

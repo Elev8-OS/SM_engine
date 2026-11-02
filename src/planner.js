@@ -128,6 +128,23 @@ export async function planNext(date) {
   return toPlan(row);
 }
 
+function buildPrompt(plan) {
+  const photoLines = plan.photos.map((p, i) => `${i + 1}. [${p.room}] ${p.motif}${p.issues ? ` (note: ${p.issues})` : ''} (property: ${p.propertyKey})`).join('\n');
+  const reelNote = plan.format === 'reel' ? 'This is a vertical reel of about 14 seconds. Slide 1 uses the hook. Each later photo gets one short line.' : plan.format === 'single' ? 'This is a single image. Keep the headline very short, the sub line may be empty.' : 'This is a carousel. Each slide is one photo with a headline. A closing slide is added automatically.';
+  return [
+    'You write social media posts for The R Villas Bali, a portfolio of private villas and apartments in Bali that guests book direct.',
+    `Pillar: ${plan.pillar}. ${plan.angle}`,
+    `Format: ${plan.format}. ${reelNote}`,
+    '', 'FACTS (the only facts you may use):', JSON.stringify({ properties: plan.properties, areaFacts: plan.areaFacts || undefined }, null, 1),
+    '', `PHOTOS in order (${plan.photos.length}):`, photoLines,
+    '', 'RULES:', ...plan.rules.map((r) => `- ${r}`),
+    '', 'Reply with one JSON object only, no markdown and no text around it, with these keys:',
+    ...Object.entries(plan.copySchema).map(([k, v]) => `- ${k}: ${v}`),
+    `The array lines must have exactly ${plan.photos.length} entries.`
+  ].join('\n');
+}
+
 function toPlan(row) {
-  return { postId: row.id, status: row.status, ...row.plan };
+  const plan = { postId: row.id, status: row.status, ...row.plan };
+  return { ...plan, prompt: buildPrompt(plan) };
 }

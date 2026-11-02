@@ -28,6 +28,33 @@ export function checkCopy(copy, plan) {
   return warnings;
 }
 
+/** Pull the first JSON object out of model text (tolerates fences or stray words). */
+export function parseCopyText(text) {
+  const t = String(text || '');
+  const a = t.indexOf('{');
+  const b = t.lastIndexOf('}');
+  if (a < 0 || b <= a) throw new HttpError(400, 'copyText contains no JSON object');
+  try {
+    return JSON.parse(t.slice(a, b + 1));
+  } catch {
+    throw new HttpError(400, 'copyText is not valid JSON');
+  }
+}
+
+/** Accepts JSON bodies or form fields (copyText and photos as strings), which is what Make sends safely. */
+export function normaliseRenderBody(body) {
+  const out = { ...(body || {}) };
+  if (!out.copy && out.copyText) out.copy = parseCopyText(out.copyText);
+  if (typeof out.photos === 'string') {
+    try {
+      out.photos = JSON.parse(out.photos);
+    } catch {
+      throw new HttpError(400, 'photos is not valid JSON');
+    }
+  }
+  return out;
+}
+
 const get = async (id) => {
   const rows = await q('select * from posts where id = $1', [id]);
   if (!rows.length) throw new HttpError(404, 'Post not found');
@@ -44,12 +71,13 @@ function validateRender(post, body) {
     const src = byId.get(p.fileId);
     if (!src || !(src.url || src.base64)) throw new HttpError(400, `Missing url or base64 for photo ${p.fileId}`);
   }
-  if (!Array.isArray(copy.lines)) throw new HttpError(400, 'copy.lines must be an array');
+  if (!Array.isArray(copy.lines)) copy.lines = [];
   return byId;
 }
 
-export async function renderPost(id, body) {
+export async function renderPost(id, rawBody) {
   const post = await get(id);
+  const body = normaliseRenderBody(rawBody);
   const byId = validateRender(post, body);
   const { copy } = body;
   const ordered = post.plan.photos.map((p) => byId.get(p.fileId));
