@@ -1,0 +1,233 @@
+import crypto from 'node:crypto';
+import { q, dbEnabled } from '../db.js';
+import { HttpError } from '../util.js';
+import { runAgent } from './run.js';
+import { TOOLS, systemPrompt, availabilityFrom, priceSummary, isDate, nightsBetween } from './tools.js';
+import { callModel, elev8Tool, pricelabsRows, findConversation, getThread, sendInstagram, agentConfig, priceIds } from './clients.js';
+
+let schemaReady = null;
+function ensureSchema() {
+  if (!schemaReady) {
+    schemaReady = q(`create table if not exists inquiries (
+      id serial primary key,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      dedupe_key text unique,
+      contact_id text,
+      contact_name text,
+      conversation_id text,
+      guest_message text,
+      thread jsonb,
+      draft text,
+      needs_human boolean not null default false,
+      reason text,
+      intent text,
+      language text,
+      status text not null default 'new',
+      trace jsonb,
+      sent_message_id text,
+      error text
+    )`)
+      .then(() => q('create index if not exists inquiries_status_idx on inquiries (status, created_at desc)'))
+      .catch((e) => {
+        schemaReady = null;
+        throw e;
+      });
+  }
+  return schemaReady;
+}
+
+const sha = (s) => crypto.createHash('sha1').update(String(s)).digest('hex').slice(0, 16);
+const today = () => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+const MULTI_UNIT = new Set(['apartments', 'merapi']);
+const link = (url) => (url ? `${url}${url.includes('?') ? '&' : '?'}utm_source=instagram&utm_medium=dm&utm_campaign=agent` : null);
+
+/** Pull the guest message out of whatever shape the GHL workflow webhook sends. */
+export function extractInbound(b) {
+  const m = b.message && typeof b.message === 'object' ? b.message : {};
+  return {
+    contactId: b.contact_id ?? b.contactId ?? b.contact?.id ?? null,
+    contactName: b.full_name ?? b.contact_name ?? b.contact?.name ?? ([b.first_name, b.last_name].filter(Boolean).join(' ') || null),
+    conversationId: b.conversation_id ?? b.conversationId ?? m.conversationId ?? null,
+    messageId: m.id ?? b.message_id ?? b.messageId ?? null,
+    text: String(typeof b.message === 'string' ? b.message : m.body ?? b.body ?? b.text ?? b.customData?.message ?? '').trim(),
+    channel: String(m.type ?? m.messageType ?? b.channel ?? b.messageType ?? '')
+  };
+}
+
+async function villa(key) {
+  const k = String(key || '').toLowerCase();
+  const rows = await q('select * from properties where key = $1', [k]);
+  if (!rows.length) throw new Error(`Unknown villa '${key}'. Use list_villas.`);
+  return rows[0];
+}
+
+function checkDates(input) {
+  const { check_in: ci, check_out: co } = input;
+  if (!isDate(ci) || !isDate(co)) throw new Error('check_in and check_out must be YYYY-MM-DD');
+  if (ci < today()) throw new Error('check_in is in the past');
+  const n = nightsBetween(ci, co).length;
+  if (n < 1) throw new Error('check_out must be after check_in');
+  if (n > 60) throw new Error('Stays over 60 nights are handled by the team');
+  return { ci, co };
+}
+
+/** The tools the model may call. All read-only. */
+export async function execute(name, input) {
+  if (name === 'list_villas') {
+    const rows = await q('select key, name, area, type, guests, size_m2, bedrooms, url, highlights, open_questions from properties order by key');
+    return rows.map((p) => ({
+      key: p.key,
+      name: p.name,
+      area: p.area,
+      type: p.type,
+      guests: p.guests,
+      size_m2: p.size_m2,
+      bedrooms: p.bedrooms,
+      highlights: p.highlights,
+      uncertain_facts: p.open_questions || undefined,
+      booking_link: link(p.url),
+      note: MULTI_UNIT.has(p.key) ? 'Several units. The team confirms availability and prices.' : undefined
+    }));
+  }
+  if (name === 'check_availability' || name === 'get_prices') {
+    const p = await villa(input.villa);
+    const { ci, co } = checkDates(input);
+    if (MULTI_UNIT.has(p.key)) return { available: null, ok: false, note: 'Several units. The team confirms.' };
+    if (name === 'check_availability') {
+      const short = p.name.replace(/^The R Villa\s+/i, '');
+      const to = new Date(Date.parse(`${co}T00:00:00Z`) + 30 * 86400000).toISOString().slice(0, 10);
+      const res = await elev8Tool('get_blocked_dates', { from_date: ci, to_date: to, listing_name: short, listing_tag: '' });
+      const hit = (res?.results || []).find((r) => `${r.internal_name} ${r.listing_name}`.toLowerCase().includes(short.toLowerCase()));
+      if (!hit) return { available: null, note: 'No calendar found for this villa. The team confirms.' };
+      return availabilityFrom(hit, ci, co);
+    }
+    const id = priceIds()[p.key];
+    if (!id) return { ok: false, note: 'No price source for this villa yet. The team confirms the price.' };
+    const { currency, rows } = await pricelabsRows(id, ci, co);
+    return priceSummary(rows, ci, co, currency);
+  }
+  throw new Error(`Unknown tool ${name}`);
+}
+
+function transcript(thread, latest) {
+  const lines = (thread || []).slice(-12).map((m) => `${m.direction === 'inbound' ? 'Guest' : 'Team'}: ${m.body}`.trim()).filter((l) => l.length > 7);
+  return [lines.length ? `Conversation so far (oldest first):\n${lines.join('\n')}\n` : '', `Latest guest message:\n${latest}`].join('\n');
+}
+
+async function sendRow(id, message) {
+  const [row] = await q('select * from inquiries where id = $1', [id]);
+  if (!row) throw new HttpError(404, 'Inquiry not found');
+  if (row.status === 'sent') throw new HttpError(409, 'Already sent');
+  const text = String(message ?? row.draft ?? '').trim();
+  if (!text) throw new HttpError(400, 'There is no text to send');
+  const r = await sendInstagram(row.contact_id, text);
+  if (!r.ok) {
+    await q("update inquiries set error = $2, updated_at = now() where id = $1", [id, `GHL send ${r.status}: ${JSON.stringify(r.response).slice(0, 300)}`]);
+    throw new HttpError(502, `GHL did not accept the message (${r.status})`);
+  }
+  await q("update inquiries set status = 'sent', draft = $2, sent_message_id = $3, error = null, updated_at = now() where id = $1", [id, text, r.messageId]);
+  return { id, status: 'sent', messageId: r.messageId };
+}
+
+export async function processInquiry(id) {
+  const [row] = await q('select * from inquiries where id = $1', [id]);
+  if (!row) return;
+  try {
+    const conversationId = row.conversation_id || (await findConversation(row.contact_id))?.id || null;
+    const thread = conversationId ? await getThread(conversationId) : [];
+    const lastIn = [...thread].reverse().find((m) => m.direction === 'inbound');
+    if (lastIn?.type && !/instagram/i.test(lastIn.type)) {
+      await q("update inquiries set status = 'ignored', conversation_id = $2, error = 'Not an Instagram message', updated_at = now() where id = $1", [id, conversationId]);
+      return;
+    }
+    const guestText = row.guest_message || lastIn?.body || '';
+    if (!guestText) {
+      await q("update inquiries set status = 'ignored', error = 'Empty message', updated_at = now() where id = $1", [id]);
+      return;
+    }
+    const history = lastIn && lastIn.body === guestText ? thread.filter((m) => m !== lastIn) : thread;
+    const result = await runAgent({ system: systemPrompt(today()), userText: transcript(history, guestText), tools: TOOLS, callModel, execute });
+    await q(
+      `update inquiries set conversation_id = $2, guest_message = $3, thread = $4, draft = $5, needs_human = $6, reason = $7, intent = $8, language = $9, trace = $10, status = 'draft_ready', error = null, updated_at = now() where id = $1`,
+      [id, conversationId, guestText, JSON.stringify(thread.slice(-12)), result.reply, result.needs_human || !result.reply, result.reason, result.intent, result.language, JSON.stringify(result.trace)]
+    );
+    if (agentConfig().auto_send && !result.needs_human && result.reply) await sendRow(id);
+  } catch (e) {
+    console.error('inquiry failed', id, e.message);
+    await q("update inquiries set status = 'failed', error = $2, updated_at = now() where id = $1", [id, String(e.message || e).slice(0, 500)]).catch(() => {});
+  }
+}
+
+async function webhook(req, res) {
+  const cfg = agentConfig();
+  if (!cfg.enabled || !process.env.AGENT_WEBHOOK_SECRET) return res.status(503).json({ error: 'The agent is not enabled' });
+  const given = Buffer.from(String(req.get('x-webhook-secret') || req.query.token || ''));
+  const want = Buffer.from(process.env.AGENT_WEBHOOK_SECRET);
+  if (given.length !== want.length || !crypto.timingSafeEqual(given, want)) return res.status(401).json({ error: 'Invalid secret' });
+  if (!dbEnabled()) return res.status(503).json({ error: 'DATABASE_URL is not configured' });
+  await ensureSchema();
+  const inb = extractInbound(req.body || {});
+  if (!inb.contactId) return res.status(400).json({ error: 'contact id missing in the webhook body' });
+  if (inb.channel && !/insta|^ig$/i.test(inb.channel)) return res.json({ ok: true, ignored: 'not an Instagram message' });
+  const key = inb.messageId || `${inb.contactId}:${sha(inb.text)}:${Math.floor(Date.now() / 120000)}`;
+  const rows = await q(
+    `insert into inquiries (dedupe_key, contact_id, contact_name, conversation_id, guest_message, status) values ($1,$2,$3,$4,$5,'new') on conflict (dedupe_key) do nothing returning id`,
+    [key, inb.contactId, inb.contactName, inb.conversationId, inb.text || null]
+  );
+  if (!rows.length) return res.json({ ok: true, duplicate: true });
+  res.json({ ok: true, id: rows[0].id });
+  processInquiry(rows[0].id).catch((e) => console.error('inquiry failed', e.message));
+}
+
+export function agentPublic(app) {
+  // Public (secret in header or ?token=): GHL workflow webhook for new Instagram messages.
+  app.post('/agent/webhook', (req, res, next) => webhook(req, res).catch(next));
+}
+
+export function agentPrivate(app, needDb, ah) {
+  app.get('/agent/status', ah(async (_req, res) => res.json(agentConfig())));
+
+  app.get('/agent/inquiries', needDb, ah(async (req, res) => {
+    await ensureSchema();
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const rows = req.query.status
+      ? await q('select id, created_at, updated_at, contact_name, guest_message, draft, needs_human, reason, intent, language, status, error from inquiries where status = $1 order by id desc limit $2', [req.query.status, limit])
+      : await q('select id, created_at, updated_at, contact_name, guest_message, draft, needs_human, reason, intent, language, status, error from inquiries order by id desc limit $1', [limit]);
+    res.json({ inquiries: rows });
+  }));
+
+  app.get('/agent/inquiries/:id', needDb, ah(async (req, res) => {
+    await ensureSchema();
+    const [row] = await q('select * from inquiries where id = $1', [Number(req.params.id)]);
+    if (!row) throw new HttpError(404, 'Inquiry not found');
+    res.json(row);
+  }));
+
+  // Approve: sends the draft, or the edited text in body.message.
+  app.post('/agent/inquiries/:id/send', needDb, ah(async (req, res) => {
+    await ensureSchema();
+    res.json(await sendRow(Number(req.params.id), req.body?.message));
+  }));
+
+  app.post('/agent/inquiries/:id/dismiss', needDb, ah(async (req, res) => {
+    await ensureSchema();
+    await q("update inquiries set status = 'dismissed', updated_at = now() where id = $1 and status <> 'sent'", [Number(req.params.id)]);
+    res.json({ id: Number(req.params.id), status: 'dismissed' });
+  }));
+
+  app.post('/agent/inquiries/:id/redraft', needDb, ah(async (req, res) => {
+    await ensureSchema();
+    await q("update inquiries set status = 'new', error = null, updated_at = now() where id = $1 and status <> 'sent'", [Number(req.params.id)]);
+    res.json({ id: Number(req.params.id), status: 'new' });
+    processInquiry(Number(req.params.id)).catch(() => {});
+  }));
+
+  // Try the agent on a typed message. Stores nothing and sends nothing.
+  app.post('/agent/test', needDb, ah(async (req, res) => {
+    const message = String(req.body?.message || '').trim();
+    if (!message) throw new HttpError(400, 'message is required');
+    const result = await runAgent({ system: systemPrompt(today()), userText: transcript([], message), tools: TOOLS, callModel, execute });
+    res.json(result);
+  }));
+}

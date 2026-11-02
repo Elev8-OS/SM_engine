@@ -14,6 +14,7 @@ import { planNext } from './planner.js';
 import { renderPost, listPosts, postView, draftToGhl, setStatus } from './posts.js';
 import { ghlConfigured, listAccounts, listUsers, getStatistics } from './ghl.js';
 import { goHandler, clickStats } from './links.js';
+import { agentPublic, agentPrivate } from './agent/routes.js';
 
 const app = express();
 app.use(express.json({ limit: '60mb' }));
@@ -45,6 +46,8 @@ app.get('/m/:id/:name', async (req, res, next) => {
 
 // Public tracked link for the bio and ads: records the click, then redirects with UTM parameters.
 app.get('/go/:id', (req, res, next) => goHandler(req, res).catch(next));
+
+agentPublic(app);
 
 app.use((req, res, next) => {
   const key = process.env.API_KEY;
@@ -194,6 +197,8 @@ app.get('/ghl/users', needGhlBase, ah(async (_req, res) => res.json(await listUs
 // Numbers for the dashboard: GHL social analytics and tracked link clicks.
 app.get('/stats/social', needGhlBase, ah(async (_req, res) => res.json(await getStatistics())));
 app.get('/stats/clicks', needDb, ah(async (req, res) => res.json(await clickStats(req.query.days))));
+
+agentPrivate(app, needDb, ah);
 
 app.use((err, _req, res, _next) => {
   if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
