@@ -82,3 +82,21 @@ export async function scheduleDrafts(post, scheduledForIso) {
   }
   return results;
 }
+
+/** Connected social accounts of the configured location, to find the ids for GHL_ACCOUNT_IDS. */
+export async function listAccounts() {
+  const res = await fetch(`${BASE}/social-media-posting/${process.env.GHL_LOCATION_ID}/accounts`, { headers: headers(), signal: AbortSignal.timeout(30000) });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false, status: res.status, response: json };
+  const accounts = (json?.results?.accounts || []).map((a) => ({ id: a.id, platform: a.platform, type: a.type, name: a.name, active: a.active, expired: a.isExpired }));
+  return { ok: true, accounts };
+}
+
+/** Users of the configured location, to find GHL_USER_ID. */
+export async function listUsers() {
+  const res = await fetch(`${BASE}/users/?locationId=${encodeURIComponent(process.env.GHL_LOCATION_ID)}`, { headers: headers(), signal: AbortSignal.timeout(30000) });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false, status: res.status, response: json };
+  const users = (json?.users || []).map((u) => ({ id: u.id, name: u.name || [u.firstName, u.lastName].filter(Boolean).join(' '), email: u.email }));
+  return { ok: true, users };
+}

@@ -11,7 +11,7 @@ import { dbEnabled, migrate, q } from './db.js';
 import { seedProperties } from './seed.js';
 import { planNext } from './planner.js';
 import { renderPost, listPosts, postView, draftToGhl, setStatus } from './posts.js';
-import { ghlConfigured } from './ghl.js';
+import { ghlConfigured, listAccounts, listUsers } from './ghl.js';
 
 const app = express();
 app.use(express.json({ limit: '60mb' }));
@@ -158,6 +158,11 @@ app.post('/catalog/upsert', needDb, ah(async (req, res) => {
 app.get('/catalog/stats', needDb, ah(async (_req, res) => {
   res.json({ perProperty: await q(`select property_key, count(*)::int as photos, count(*) filter (where quality >= 4)::int as good, round(avg(quality), 1)::float as avg_quality from photos group by property_key order by property_key`) });
 }));
+
+// Helpers to find the ids needed for GHL_ACCOUNT_IDS and GHL_USER_ID. Need only GHL_API_TOKEN and GHL_LOCATION_ID.
+const needGhlBase = (_req, _res, next) => (process.env.GHL_API_TOKEN && process.env.GHL_LOCATION_ID ? next() : next(new HttpError(409, 'Set GHL_API_TOKEN and GHL_LOCATION_ID first')));
+app.get('/ghl/accounts', needGhlBase, ah(async (_req, res) => res.json(await listAccounts())));
+app.get('/ghl/users', needGhlBase, ah(async (_req, res) => res.json(await listUsers())));
 
 app.use((err, _req, res, _next) => {
   if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
