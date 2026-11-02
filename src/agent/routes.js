@@ -3,6 +3,7 @@ import { q, dbEnabled } from '../db.js';
 import { HttpError } from '../util.js';
 import { runAgent } from './run.js';
 import { TOOLS, systemPrompt, availabilityFrom, priceSummary, isDate, nightsBetween } from './tools.js';
+import { notifyConfigured, buildMail, sendMail } from './notify.js';
 import { callModel, elev8Tool, pricelabsRows, findConversation, getThread, sendInstagram, agentConfig, priceIds } from './clients.js';
 
 let schemaReady = null;
@@ -29,6 +30,7 @@ function ensureSchema() {
       error text
     )`)
       .then(() => q('create index if not exists inquiries_status_idx on inquiries (status, created_at desc)'))
+      .then(() => q('alter table inquiries add column if not exists notified_at timestamptz'))
       .then(() => q('create table if not exists webhook_debug (id serial primary key, created_at timestamptz not null default now(), note text, keys text, body text)'))
       .catch((e) => {
         schemaReady = null;
@@ -150,6 +152,20 @@ async function sendRow(id, message) {
   return { id, status: 'sent', messageId: r.messageId };
 }
 
+/** Mail the team once when an inquiry needs a person or failed. Never throws. */
+async function notifyIfNeeded(id) {
+  try {
+    if (!notifyConfigured()) return;
+    const [row] = await q('select * from inquiries where id = $1', [id]);
+    if (!row || row.notified_at || !(row.status === 'failed' || (row.status === 'draft_ready' && row.needs_human))) return;
+    const r = await sendMail(buildMail(row));
+    if (r.ok) await q('update inquiries set notified_at = now() where id = $1', [id]);
+    else console.error('notify failed', JSON.stringify(r).slice(0, 300));
+  } catch (e) {
+    console.error('notify error', e.message);
+  }
+}
+
 export async function processInquiry(id) {
   const [row] = await q('select * from inquiries where id = $1', [id]);
   if (!row) return;
@@ -173,9 +189,11 @@ export async function processInquiry(id) {
       [id, conversationId, guestText, JSON.stringify(thread.slice(-12)), result.reply, result.needs_human || !result.reply, result.reason, result.intent, result.language, JSON.stringify(result.trace)]
     );
     if (agentConfig().auto_send && !result.needs_human && result.reply) await sendRow(id);
+    await notifyIfNeeded(id);
   } catch (e) {
     console.error('inquiry failed', id, e.message);
     await q("update inquiries set status = 'failed', error = $2, updated_at = now() where id = $1", [id, String(e.message || e).slice(0, 500)]).catch(() => {});
+    await notifyIfNeeded(id);
   }
 }
 
@@ -210,7 +228,13 @@ export function agentPublic(app) {
 }
 
 export function agentPrivate(app, needDb, ah) {
-  app.get('/agent/status', ah(async (_req, res) => res.json(agentConfig())));
+  app.get('/agent/status', ah(async (_req, res) => res.json({ ...agentConfig(), notify_configured: notifyConfigured() })));
+
+  // Sends a sample notification to the configured address(es), to check the mail path.
+  app.get('/agent/notify-test', ah(async (_req, res) => {
+    const mail = buildMail({ contact_name: 'Test', created_at: new Date(), status: 'draft_ready', guest_message: 'Das ist eine Test-Nachricht.', reason: 'Testmail der Engine', draft: 'Hi, hier ist Lea. Das ist ein Testentwurf.' });
+    res.json(await sendMail(mail));
+  }));
 
   app.get('/agent/inquiries', needDb, ah(async (req, res) => {
     await ensureSchema();
