@@ -6,6 +6,7 @@ RUN apt-get update \
 WORKDIR /app
 COPY package.json ./
 RUN npm install --omit=dev
+COPY db ./db
 COPY src ./src
 COPY assets ./assets
 ENV NODE_ENV=production
