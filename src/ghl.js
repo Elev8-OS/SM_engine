@@ -132,7 +132,7 @@ export async function listUsers() {
 
 const messageOf = (r) => {
   const m = r && (r.message ?? r.error ?? r.msg);
-  return m ? (Array.isArray(m) ? m.join('; ') : String(m)).slice(0, 200) : null;
+  return m ? (Array.isArray(m) ? m.join('; ') : String(m)).slice(0, 400) : null;
 };
 
 /**
@@ -142,7 +142,7 @@ const messageOf = (r) => {
 export async function getStatistics() {
   const loc = process.env.GHL_LOCATION_ID;
   const fail = (where, status, response, extra = {}) => {
-    console.error('GHL statistics failed', where, status, JSON.stringify(response ?? {}).slice(0, 300));
+    console.error('GHL statistics failed', where, status, JSON.stringify(response ?? {}).slice(0, 400));
     return { ok: false, status, where, message: messageOf(response), ...extra };
   };
   const accRes = await fetch(`${BASE}/social-media-posting/${loc}/accounts`, { headers: headers(), signal: AbortSignal.timeout(30000) });
@@ -153,7 +153,9 @@ export async function getStatistics() {
   const profileIds = [...new Set(accs.map((a) => a.profileId).filter(Boolean))];
   const platforms = [...new Set(accs.map((a) => a.platform).filter(Boolean))];
   if (!profileIds.length) {
-    return fail('no_accounts', 404, { message: `GHL lists ${all.length} connected accounts, none of them active and valid` }, { accounts: all.map((a) => ({ platform: a.platform, active: a.active, expired: a.isExpired })) });
+    // Say which accounts the engine sees (names, state, expiry), so a wrong location or an expired login is obvious.
+    const detail = all.map((a) => `${a.platform} "${a.name || '?'}" (active: ${a.active}, expired: ${a.isExpired}${a.expire ? `, valid until ${String(a.expire).slice(0, 10)}` : ''})`).join('; ');
+    return fail('no_accounts', 404, { message: `GHL lists ${all.length} account(s) for location ...${String(loc || '').slice(-4)}: ${detail || 'none'}` }, { accounts: all.map((a) => ({ platform: a.platform, name: a.name, active: a.active, expired: a.isExpired })) });
   }
   const call = (withLocation) =>
     fetch(`${BASE}/social-media-posting/statistics${withLocation ? `?locationId=${encodeURIComponent(loc)}` : ''}`, {
