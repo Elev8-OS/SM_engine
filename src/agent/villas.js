@@ -39,7 +39,7 @@ export function linkResult(p, input, { multiUnit = false } = {}) {
     return { ok: false, note: `${p.name} sleeps up to ${max} guests and this group is ${adults + children}. Do not send a link for it. Suggest a villa that fits the group or hand over to the team.` };
   }
   try {
-    const url = bookingLink(p.url, { checkIn: input.check_in, checkOut: input.check_out, adults, children }, DM_UTM);
+    const url = bookingLink(p.url, { checkIn: input.check_in, checkOut: input.check_out, adults, children, currency: input.currency }, DM_UTM);
     return {
       ok: true,
       villa: p.name,
@@ -47,6 +47,7 @@ export function linkResult(p, input, { multiUnit = false } = {}) {
       check_out: input.check_out,
       adults,
       children,
+      currency: input.currency ? String(input.currency).toUpperCase() : undefined,
       booking_link: url,
       note: multiUnit ? 'Several units. Say the team confirms which unit is free.' : 'Share this link exactly as it is.'
     };

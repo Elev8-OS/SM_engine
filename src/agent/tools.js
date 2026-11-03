@@ -52,10 +52,12 @@ export function priceSummary(rows, checkIn, checkOut, currency) {
 
 // Query parameters the booking page reads. Dates are YYYY-MM-DD.
 export const BOOKING_PARAMS = { checkIn: 'check_in_date', checkOut: 'check_out_date', adults: 'number_of_adult', children: 'number_of_children' };
+// Currency the booking page should open in. Only sent when the guest asked for one (the page default is CHF).
+export const CURRENCY_PARAM = 'currency';
 export const DM_UTM = { utm_source: 'instagram', utm_medium: 'dm', utm_campaign: 'agent' };
 
 /** Booking page link of a villa with the stay already filled in. Throws a readable error on bad input. */
-export function bookingLink(baseUrl, { checkIn, checkOut, adults, children = 0 } = {}, extra = {}) {
+export function bookingLink(baseUrl, { checkIn, checkOut, adults, children = 0, currency } = {}, extra = {}) {
   if (!baseUrl) throw new Error('This villa has no booking page yet. The team shares the link.');
   if (!isDate(checkIn) || !isDate(checkOut)) throw new Error('check_in and check_out must be YYYY-MM-DD');
   if (checkOut <= checkIn) throw new Error('check_out must be after check_in');
@@ -63,11 +65,14 @@ export function bookingLink(baseUrl, { checkIn, checkOut, adults, children = 0 }
   const c = Number(children ?? 0);
   if (!Number.isInteger(a) || a < 1 || a > 30) throw new Error('adults must be a whole number of at least 1');
   if (!Number.isInteger(c) || c < 0 || c > 20) throw new Error('children must be a whole number, 0 or more');
+  const cur = currency ? String(currency).toUpperCase() : '';
+  if (cur && !/^[A-Z]{3}$/.test(cur)) throw new Error('currency must be a 3-letter code, for example IDR');
   const u = new URL(baseUrl);
   u.searchParams.set(BOOKING_PARAMS.checkIn, checkIn);
   u.searchParams.set(BOOKING_PARAMS.checkOut, checkOut);
   u.searchParams.set(BOOKING_PARAMS.adults, String(a));
   u.searchParams.set(BOOKING_PARAMS.children, String(c));
+  if (cur) u.searchParams.set(CURRENCY_PARAM, cur);
   for (const [k, v] of Object.entries(extra)) u.searchParams.set(k, v);
   return u.toString();
 }
@@ -108,9 +113,20 @@ export const TOOLS = [
         check_in: { type: 'string', description: 'YYYY-MM-DD' },
         check_out: { type: 'string', description: 'YYYY-MM-DD, the departure day' },
         adults: { type: 'integer', description: 'Number of adults (13 and older), at least 1' },
-        children: { type: 'integer', description: 'Number of children (2 to 12). 0 only if the guest said so or the group is clearly adults only.' }
+        children: { type: 'integer', description: 'Number of children (2 to 12). 0 only if the guest said so or the group is clearly adults only.' },
+        currency: { type: 'string', description: 'Only when the guest asked for prices in a currency other than CHF: its 3-letter code, for example IDR, EUR or USD. The booking page then opens in that currency. Leave it out otherwise.' }
       },
       required: ['villa', 'check_in', 'check_out', 'adults', 'children'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'convert_currency',
+    description: 'Converts an amount between currencies with a current exchange rate. Use it whenever you quote a price in another currency than the one get_prices returned, for example when a guest asks for IDR, EUR or USD. Never convert in your head. The result is indicative: say "about".',
+    input_schema: {
+      type: 'object',
+      properties: { amount: { type: 'number', description: 'The amount to convert, for example the total from get_prices' }, from: { type: 'string', description: '3-letter code of the amount, for example CHF' }, to: { type: 'string', description: '3-letter code the guest asked for, for example IDR' } },
+      required: ['amount', 'from', 'to'],
       additionalProperties: false
     }
   },
@@ -145,10 +161,11 @@ export function systemPrompt(today) {
     '- Use only facts from the tools. Never invent amenities, distances, rules, discounts or availability.',
     '- A fact listed in uncertain_facts is not confirmed. Do not state it. Say the team confirms it.',
     '- Before saying a villa is free or not, call check_availability. Before naming a price, call get_prices for those exact dates. Quote only what the tools return and call it indicative: say the final price is shown on the booking page.',
+    '- Prices are in the currency get_prices returns, usually CHF. If the guest asks for another currency (IDR, EUR, USD ...), call convert_currency for each amount you quote, say "about" and that the booking page shows the final price in the chosen currency. Name the original CHF amount too, so the guest can check it. Never convert in your head.',
     '- Mention the minimum stay when meets_minimum_stay is false or when it matters.',
     '- If dates, number of guests or both are missing, ask for them in one short question instead of guessing. Ask for adults and children together ("how many adults and how many children?"). You may suggest villas that fit the guest count.',
     '- A group larger than the villa sleeps (guests in list_villas) does not fit: say so and suggest a villa that does, or hand over to the team.',
-    '- To book, share a booking link. Once the villa, check-in, check-out, the number of adults and the number of children are all known from the guest, call build_booking_link and share exactly the link it returns, because it opens the booking page with the stay already filled in. Otherwise share the booking_link from list_villas. Never guess a date or a number for the link; if only the number of children is unclear, ask. Check availability first and do not send a link for dates that are not available: offer other dates or another villa.',
+    '- To book, share a booking link. Once the villa, check-in, check-out, the number of adults and the number of children are all known from the guest, call build_booking_link and share exactly the link it returns, because it opens the booking page with the stay already filled in. If the guest asked for a currency other than CHF, pass it as currency (3-letter code, for example IDR) so the page opens in that currency. Otherwise share the booking_link from list_villas. Never guess a date or a number for the link; if only the number of children is unclear, ask. Check availability first and do not send a link for dates that are not available: offer other dates or another villa.',
     '- Do not promise a booking, do not take payment details, do not hold dates.',
     '- Never give access codes, WiFi details or exact addresses.',
     '',
