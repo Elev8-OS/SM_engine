@@ -1,5 +1,6 @@
 import { q, dbEnabled } from './db.js';
 import { audienceRoutes } from './audience.js';
+import { maybeAnalyse, learningRoutes } from './learnings.js';
 
 // Per-post Instagram numbers from the Meta Graph API (Instagram API with Facebook Login).
 // Needs META_ACCESS_TOKEN and META_IG_USER_ID.
@@ -150,9 +151,10 @@ let running = null;
 /** One sync at a time. Never rejects: problems end up in lastError and are shown in the dashboard. */
 function startSync() {
   running ??= runSync()
-    .then(() => {
+    .then(async () => {
       lastError = null;
       lastSyncAt = Date.now();
+      await maybeAnalyse().catch((e) => console.error('Learnings analysis failed:', e.message));
     })
     .catch((e) => {
       lastError = { message: String(e.message || e).slice(0, 300), code: e.code ?? null, tokenExpired: e.code === 190 };
@@ -277,7 +279,7 @@ function startScheduler() {
   globalThis.__insightsTimer.unref();
 }
 
-// Analytics routes: per-post Instagram numbers, Meta account helper and the audience planner.
+// Analytics routes: per-post Instagram numbers, Meta account helper, the audience planner and learnings.
 export function insightsRoutes(app, needDb, ah) {
   startScheduler();
   app.get('/stats/posts', needDb, ah(async (req, res) => {
@@ -286,5 +288,6 @@ export function insightsRoutes(app, needDb, ah) {
     res.json(await postInsights({ refresh: req.query.refresh === '1', days: Number.isFinite(days) ? days : 90, limit: req.query.limit }));
   }));
   audienceRoutes(app, needDb, ah);
+  learningRoutes(app, needDb, ah);
   app.get('/stats/meta/accounts', ah(async (_req, res) => res.json(await metaAccounts())));
 }
