@@ -1,0 +1,33 @@
+{
+  "key": "samalas",
+  "name": "The R Villa Samalas",
+  "updated": "2026-11-03",
+  "guestsMax": 10,
+  "bedrooms": 4,
+  "bathrooms": 3,
+  "plotM2": 300,
+  "bedroomsText": "4 (3 bedrooms with their own en-suite bathroom, 1 bunk-bed room without its own bathroom), plus a sofa bed in the living room",
+  "facts": [
+    { "text": "Sleeps up to 10 guests.", "status": "confirmed", "source": "owner, 2026-11-03" },
+    { "text": "4 bedrooms: 3 of them have their own en-suite bathroom, 1 is a bunk-bed room without a bathroom of its own. There are 3 bathrooms in total.", "status": "confirmed", "source": "owner, 2026-11-03" },
+    { "text": "There is a sofa bed in the living room.", "status": "confirmed", "source": "owner, 2026-11-03" },
+    { "text": "The plot is 300 m² and includes the garden, the pool and the pool deck. That is plot size, not living space. Never call it villa size or living area.", "status": "confirmed", "source": "owner, 2026-11-03" },
+    { "text": "Private pool with a pool deck.", "status": "confirmed", "source": "owner, 2026-11-03", "tags": ["pool"] },
+    { "text": "A garden that is part of the living area (outdoor living around the pool).", "status": "confirmed", "source": "owner, 2026-11-03", "tags": ["garden"] },
+    { "text": "Single-level home.", "status": "elev8", "source": "Elev8 questionnaire" },
+    { "text": "Air conditioning, WiFi, TV, safe, hair dryer, iron and ironing board.", "status": "elev8", "source": "Elev8 questionnaire" },
+    { "text": "Kitchen with stove, microwave, coffee maker, toaster, blender, a refrigerator with freezer and a mini fridge; dining table.", "status": "elev8", "source": "Elev8 questionnaire" },
+    { "text": "Stereo sound system.", "status": "elev8", "source": "Elev8 questionnaire" },
+    { "text": "Private entrance and outdoor furniture.", "status": "elev8", "source": "Elev8 questionnaire" },
+    { "text": "Parking in front of the gate for one car.", "status": "elev8", "source": "Elev8 questionnaire" }
+  ],
+  "absent": [
+    { "term": "bathtub", "text": "No bathtub.", "source": "Elev8 questionnaire (past guest communication)" }
+  ],
+  "open": [
+    "Living area in m² is not known. Do not state any size other than the 300 m² plot.",
+    "No view claims (rice fields, sunset, ocean) and no distance to the beach are confirmed.",
+    "Whether a crib and highchair are kept on site is unclear (the questionnaire says yes, the add-on says order in advance). Do not mention them.",
+    "Hot tub, barbecue, gym, cinema and rooftop are not confirmed. Do not mention them."
+  ]
+}

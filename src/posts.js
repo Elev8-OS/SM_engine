@@ -8,6 +8,7 @@ import { renderCarousel } from './carousel.js';
 import { putFile, presign } from './storage.js';
 import { mediaUrl } from './media.js';
 import { createDrafts, scheduleDrafts, ghlConfigured } from './ghl.js';
+import { checkFacts, factNumbers } from './facts.js';
 
 const SITE = 'elevate-villas.com'; // shown as plain text, never as a button
 const BANNED = ['leverage', 'synergy', 'synergies', 'ecosystem', 'world-class', 'best-in-class', 'innovative solution', 'unlock', 'seamless', 'actualize'];
@@ -19,12 +20,16 @@ export function checkCopy(copy, plan) {
   for (const w of BANNED) if (text.includes(w)) warnings.push(`Banned word: ${w}`);
   const guests = new Set(plan.properties.map((p) => p.guests).filter(Boolean));
   const beds = new Set(plan.properties.flatMap((p) => String(p.bedrooms || '').match(/\d+/g) || []).map(Number));
+  const fromSheets = factNumbers(plan); // fact sheets know more than the properties table (for example 10 guests)
+  fromSheets.guests.forEach((n) => guests.add(n));
+  fromSheets.bedrooms.forEach((n) => beds.add(n));
   const caps = Object.values(copy.captions || {}).join(' ');
   for (const m of caps.matchAll(/(\d+)\s*(guests?|bedrooms?)/gi)) {
     const n = Number(m[1]);
     const set = /guest/i.test(m[2]) ? guests : beds;
     if (set.size && !set.has(n)) warnings.push(`Number not in facts: ${m[0]}`);
   }
+  warnings.push(...checkFacts(copy, plan));
   if (!copy.captions?.instagram) warnings.push('Missing Instagram caption');
   if (!Array.isArray(copy.hashtags) || copy.hashtags.length < 3) warnings.push('Too few hashtags');
   return warnings;

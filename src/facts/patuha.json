@@ -1,0 +1,29 @@
+{
+  "key": "patuha",
+  "name": "The R Villa Patuha",
+  "updated": "2026-11-03",
+  "guestsMax": 8,
+  "bedrooms": 4,
+  "bathrooms": 3,
+  "buildingM2": 240,
+  "bedroomsText": "4 (2 bedrooms with king beds and en-suite bathroom, 1 bedroom with 2 single beds and en-suite bathroom, 1 office bedroom with a sofa bed that shares a bathroom)",
+  "facts": [
+    { "text": "Sleeps up to 8 guests.", "status": "elev8", "source": "Elev8 and website, not yet confirmed by the owner" },
+    { "text": "4 bedrooms and 3 bathrooms: 2 bedrooms with king beds and en-suite bathroom, 1 bedroom with 2 single beds and en-suite bathroom, and 1 bedroom with a sofa bed and a workspace that shares a bathroom with another bedroom.", "status": "confirmed", "source": "earlier confirmed website facts, matches Elev8" },
+    { "text": "Private pool facing the rice fields.", "status": "confirmed", "source": "earlier confirmed website facts and listing title", "tags": ["pool", "rice_view"] },
+    { "text": "A workspace with desk, WiFi and sofa bed in one bedroom.", "status": "confirmed", "source": "earlier confirmed website facts", "tags": ["workspace"] },
+    { "text": "Fully equipped kitchen.", "status": "confirmed", "source": "earlier confirmed website facts" },
+    { "text": "Free parking; the villa can be reached by any type of car, and there is motorbike parking.", "status": "confirmed", "source": "earlier confirmed website facts, Elev8" },
+    { "text": "Air conditioning in the bedrooms.", "status": "confirmed", "source": "earlier confirmed website facts" },
+    { "text": "The building is 240 m². That is building size, not plot size.", "status": "elev8", "source": "Elev8 property description" },
+    { "text": "Fast fibre internet and WiFi, smart TVs, a sunken sofa and custom-made furniture.", "status": "elev8", "source": "Elev8 questionnaire" }
+  ],
+  "absent": [
+    { "term": "pets", "text": "No pets allowed.", "source": "earlier confirmed website facts" }
+  ],
+  "open": [
+    "A rooftop terrace with rice field and sunset views is listed by Elev8 but not confirmed. Do not mention the rooftop or sunset views.",
+    "One other villa is nearby. Never call the villa secluded or say there are no neighbours.",
+    "Distance to the beach is not confirmed."
+  ]
+}

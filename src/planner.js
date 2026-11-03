@@ -3,6 +3,7 @@ import { HttpError } from './util.js';
 import { slotFor, PILLARS, RULES, COPY_SCHEMA } from './strategy.js';
 import { AREAS } from './seed.js';
 import { activeGuidance } from './learnings.js';
+import { promptBlock, withFacts } from './facts.js';
 
 const HERO_ROOMS = ['pool', 'exterior', 'view', 'terrace'];
 const DETAIL_ROOMS = ['detail', 'bathroom', 'kitchen', 'living', 'bedroom', 'pool'];
@@ -149,7 +150,8 @@ function buildPrompt(plan) {
     'You write social media posts for The R Villas Bali, a portfolio of private villas and apartments in Bali that guests book direct.',
     `Pillar: ${plan.pillar}. ${plan.angle}`,
     `Format: ${plan.format}. ${reelNote}`,
-    '', 'FACTS (the only facts you may use):', JSON.stringify({ properties: plan.properties, areaFacts: plan.areaFacts || undefined }, null, 1),
+    '', 'FACTS (the only facts you may use):', JSON.stringify({ properties: plan.properties.map(withFacts), areaFacts: plan.areaFacts || undefined }, null, 1),
+    ...promptBlock(plan.properties),
     '', `PHOTOS in order (${plan.photos.length}):`, photoLines,
     '', 'RULES:', ...plan.rules.map((r) => `- ${r}`),
     '', 'Reply with one JSON object only, no markdown and no text around it, with these keys:',
