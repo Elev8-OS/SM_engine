@@ -6,8 +6,8 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "test": "node test/unit.js && node test/smoke.js",
-    "test:unit": "node test/unit.js"
+    "test": "node test/unit.js && node test/read.js && node test/smoke.js",
+    "test:unit": "node test/unit.js && node test/read.js"
   },
   "engines": {
     "node": ">=20"

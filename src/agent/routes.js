@@ -4,6 +4,7 @@ import { HttpError } from '../util.js';
 import { runAgent } from './run.js';
 import { TOOLS, systemPrompt, availabilityFrom, priceSummary, isDate, nightsBetween } from './tools.js';
 import { villaView, linkResult } from './villas.js';
+import { readGuest, whyEmpty } from './read.js';
 import { notifyConfigured, buildMail, sendMail } from './notify.js';
 import { callModel, elev8Tool, pricelabsRows, findConversation, getThread, sendInstagram, agentConfig, priceIds } from './clients.js';
 
@@ -163,16 +164,17 @@ export async function processInquiry(id) {
   const [row] = await q('select * from inquiries where id = $1', [id]);
   if (!row) return;
   try {
-    const conversationId = row.conversation_id || (await findConversation(row.contact_id))?.id || null;
-    const thread = conversationId ? await getThread(conversationId) : [];
-    const lastIn = [...thread].reverse().find((m) => m.direction === 'inbound');
+    // The text is read with a few retries: GHL fires the webhook before the message is always readable.
+    const read = await readGuest(row, { findConversation, getThread });
+    const { conversationId, thread, lastIn, text: guestText } = read;
     if (lastIn?.type && !/instagram/i.test(lastIn.type)) {
       await q("update inquiries set status = 'ignored', conversation_id = $2, error = 'Not an Instagram message', updated_at = now() where id = $1", [id, conversationId]);
       return;
     }
-    const guestText = row.guest_message || lastIn?.body || '';
     if (!guestText) {
-      await q("update inquiries set status = 'ignored', error = 'Empty message', updated_at = now() where id = $1", [id]);
+      // Not silently ignored: the team is told to look at it in GHL, with the reason.
+      await q("update inquiries set status = 'failed', conversation_id = $2, thread = $3, error = $4, updated_at = now() where id = $1", [id, conversationId, JSON.stringify(thread.slice(-12)), whyEmpty(read)]);
+      await notifyIfNeeded(id);
       return;
     }
     const history = lastIn && lastIn.body === guestText ? thread.filter((m) => m !== lastIn) : thread;
