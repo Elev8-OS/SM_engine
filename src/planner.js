@@ -4,6 +4,7 @@ import { slotFor, PILLARS, RULES, COPY_SCHEMA } from './strategy.js';
 import { AREAS } from './seed.js';
 import { activeGuidance } from './learnings.js';
 import { promptBlock, withFacts } from './facts.js';
+import { areaPromptBlock } from './area.js';
 
 const HERO_ROOMS = ['pool', 'exterior', 'view', 'terrace'];
 const DETAIL_ROOMS = ['detail', 'bathroom', 'kitchen', 'living', 'bedroom', 'pool'];
@@ -152,6 +153,8 @@ function buildPrompt(plan) {
     `Format: ${plan.format}. ${reelNote}`,
     '', 'FACTS (the only facts you may use):', JSON.stringify({ properties: plan.properties.map(withFacts), areaFacts: plan.areaFacts || undefined }, null, 1),
     ...promptBlock(plan.properties),
+    // Real places around the villa. Neighbourhood posts get the full list, the others only the closest few.
+    ...(plan.pillar === 'design_details' ? [] : areaPromptBlock(plan.properties, { all: plan.pillar === 'neighbourhood' })),
     '', `PHOTOS in order (${plan.photos.length}):`, photoLines,
     '', 'RULES:', ...plan.rules.map((r) => `- ${r}`),
     '', 'Reply with one JSON object only, no markdown and no text around it, with these keys:',

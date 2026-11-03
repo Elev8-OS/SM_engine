@@ -3,6 +3,7 @@ import { q, dbEnabled } from '../db.js';
 import { HttpError } from '../util.js';
 import { runAgent } from './run.js';
 import { TOOLS, systemPrompt, availabilityFrom, priceSummary, isDate, nightsBetween } from './tools.js';
+import { villaView, linkResult } from './villas.js';
 import { notifyConfigured, buildMail, sendMail } from './notify.js';
 import { callModel, elev8Tool, pricelabsRows, findConversation, getThread, sendInstagram, agentConfig, priceIds } from './clients.js';
 
@@ -43,7 +44,6 @@ function ensureSchema() {
 const sha = (s) => crypto.createHash('sha1').update(String(s)).digest('hex').slice(0, 16);
 const today = () => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
 const MULTI_UNIT = new Set(['apartments', 'merapi']);
-const link = (url) => (url ? `${url}${url.includes('?') ? '&' : '?'}utm_source=instagram&utm_medium=dm&utm_campaign=agent` : null);
 
 /** First string or number value under a key matching re, searched a few levels deep. */
 function findKey(obj, re, depth = 0) {
@@ -98,19 +98,12 @@ function checkDates(input) {
 export async function execute(name, input) {
   if (name === 'list_villas') {
     const rows = await q('select key, name, area, type, guests, size_m2, bedrooms, url, highlights, open_questions from properties order by key');
-    return rows.map((p) => ({
-      key: p.key,
-      name: p.name,
-      area: p.area,
-      type: p.type,
-      guests: p.guests,
-      size_m2: p.size_m2,
-      bedrooms: p.bedrooms,
-      highlights: p.highlights,
-      uncertain_facts: p.open_questions || undefined,
-      booking_link: link(p.url),
-      note: MULTI_UNIT.has(p.key) ? 'Several units. The team confirms availability and prices.' : undefined
-    }));
+    return rows.map((p) => villaView(p, MULTI_UNIT.has(p.key)));
+  }
+  if (name === 'build_booking_link') {
+    const p = await villa(input.villa);
+    checkDates(input);
+    return linkResult(p, input, { multiUnit: MULTI_UNIT.has(p.key) });
   }
   if (name === 'check_availability' || name === 'get_prices') {
     const p = await villa(input.villa);
