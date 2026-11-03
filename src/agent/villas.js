@@ -54,3 +54,19 @@ export function linkResult(p, input, { multiUnit = false } = {}) {
     return { ok: false, note: String(e.message || e) };
   }
 }
+
+/**
+ * Adds the fees of a fact sheet (for example a cleaning fee) to a price summary.
+ * total stays the accommodation; total_incl_fees is what to quote. A fee without an amount is ignored,
+ * and a fee in another currency is not added but reported, so a wrong total is never quoted.
+ */
+export function withFees(summary, fees) {
+  if (!summary?.ok) return summary;
+  const usable = (fees || []).filter((f) => Number.isFinite(f.amount) && f.amount > 0);
+  if (!usable.length) return summary;
+  const other = usable.find((f) => f.currency && summary.currency && f.currency !== summary.currency);
+  if (other) return { ...summary, fees_note: `A ${other.label || other.name} is set in ${other.currency}, the price is in ${summary.currency}. Say that the team confirms the fees.` };
+  const list = usable.map((f) => ({ name: f.label || f.name, amount: Math.round(f.per === 'night' ? f.amount * summary.nights : f.amount), currency: summary.currency }));
+  const feesTotal = list.reduce((a, f) => a + f.amount, 0);
+  return { ...summary, fees: list, fees_total: feesTotal, total_incl_fees: summary.total + feesTotal, average_per_night_incl_fees: Math.round((summary.total + feesTotal) / summary.nights), note: `Quote total_incl_fees and say that it includes the ${list.map((f) => f.name).join(' and ')}.` };
+}

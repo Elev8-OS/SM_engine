@@ -7,6 +7,9 @@
   "bathrooms": 3,
   "plotM2": 300,
   "bedroomsText": "4 (3 bedrooms with a king bed and their own en-suite bathroom, 1 bunk-bed room without its own bathroom), plus a sofa bed in the living room",
+  "fees": [
+    { "name": "cleaning", "label": "cleaning fee", "amount": null, "currency": "CHF", "per": "stay", "source": "not found in Elev8 (add-ons, questionnaire, bookings) or PriceLabs; owner to confirm" }
+  ],
   "facts": [
     { "text": "Sleeps up to 10 guests.", "status": "confirmed", "source": "owner, 2026-11-03" },
     { "text": "4 bedrooms: 3 of them have a king bed and their own en-suite bathroom, 1 is a bunk-bed room without a bathroom of its own. There are 3 bathrooms in total.", "status": "confirmed", "source": "owner, 2026-11-03" },
@@ -31,6 +34,7 @@
     "No view claims (rice fields, sunset, ocean) are confirmed.",
     "Never call the villa beachfront or say the sea is for swimming.",
     "Whether a crib and highchair are kept on site is unclear (the questionnaire says yes, the add-on says order in advance). Do not mention them.",
-    "Hot tub, barbecue, gym, cinema and rooftop are not confirmed. Do not mention them."
+    "Hot tub, barbecue, gym, cinema and rooftop are not confirmed. Do not mention them.",
+    "A cleaning fee is not stored yet. Do not state an amount and do not say there is none: say the final price with all fees is shown on the booking page."
   ]
 }
