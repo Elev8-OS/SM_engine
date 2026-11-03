@@ -9,6 +9,7 @@ import { putFile, presign } from './storage.js';
 import { mediaUrl } from './media.js';
 import { createDrafts, scheduleDrafts, ghlConfigured } from './ghl.js';
 import { checkFacts, factNumbers } from './facts.js';
+import { checkArea } from './area.js';
 
 const SITE = 'elevate-villas.com'; // shown as plain text, never as a button
 const BANNED = ['leverage', 'synergy', 'synergies', 'ecosystem', 'world-class', 'best-in-class', 'innovative solution', 'unlock', 'seamless', 'actualize'];
@@ -30,6 +31,7 @@ export function checkCopy(copy, plan) {
     if (set.size && !set.has(n)) warnings.push(`Number not in facts: ${m[0]}`);
   }
   warnings.push(...checkFacts(copy, plan));
+  warnings.push(...checkArea(copy, plan)); // places, walking times, prices and ratings of places
   if (!copy.captions?.instagram) warnings.push('Missing Instagram caption');
   if (!Array.isArray(copy.hashtags) || copy.hashtags.length < 3) warnings.push('Too few hashtags');
   return warnings;
