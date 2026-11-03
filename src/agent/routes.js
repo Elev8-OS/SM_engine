@@ -165,7 +165,12 @@ async function notifyIfNeeded(id) {
   }
 }
 
-export async function processInquiry(id) {
+/**
+ * Reads the guest message, lets Lea write the reply and saves it as a draft.
+ * With auto true (a message that just arrived) the answer mode of the SM Manager may send it by itself.
+ * A redraft pressed by a person never sends on its own.
+ */
+export async function processInquiry(id, { auto = false } = {}) {
   const [row] = await q('select * from inquiries where id = $1', [id]);
   if (!row) return;
   try {
@@ -191,7 +196,7 @@ export async function processInquiry(id) {
     );
     // Answer mode set in the SM Manager: always approve, always automatic, or automatic inside a time window.
     // A reply that needs a person is never sent by itself.
-    if (mayAutoSend(await loadSettings(q), { reply: result.reply, needs_human: needsHuman })) {
+    if (auto && mayAutoSend(await loadSettings(q), { reply: result.reply, needs_human: needsHuman })) {
       await sendRow(id);
       await q('update inquiries set auto_sent = true where id = $1', [id]);
     }
@@ -225,7 +230,7 @@ async function webhook(req, res) {
   );
   if (!rows.length) return res.json({ ok: true, duplicate: true });
   res.json({ ok: true, id: rows[0].id });
-  processInquiry(rows[0].id).catch((e) => console.error('inquiry failed', e.message));
+  processInquiry(rows[0].id, { auto: true }).catch((e) => console.error('inquiry failed', e.message));
 }
 
 export function agentPublic(app) {
@@ -293,7 +298,7 @@ export function agentPrivate(app, needDb, ah) {
     await ensureSchema();
     await q("update inquiries set status = 'new', error = null, updated_at = now() where id = $1 and status <> 'sent'", [Number(req.params.id)]);
     res.json({ id: Number(req.params.id), status: 'new' });
-    processInquiry(Number(req.params.id)).catch(() => {});
+    processInquiry(Number(req.params.id)).catch(() => {}); // never automatic: a person asked for a new draft
   }));
 
   // Try the agent on a typed message. Stores nothing and sends nothing.
