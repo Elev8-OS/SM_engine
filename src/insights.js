@@ -1,11 +1,13 @@
-import { q } from './db.js';
+import { q, dbEnabled } from './db.js';
 import { audienceRoutes } from './audience.js';
 
 // Per-post Instagram numbers from the Meta Graph API (Instagram API with Facebook Login).
-// Needs META_ACCESS_TOKEN (a Page access token) and META_IG_USER_ID (the Instagram business account id).
+// Needs META_ACCESS_TOKEN and META_IG_USER_ID.
 const VERSION = () => process.env.META_GRAPH_VERSION || 'v22.0';
 const GRAPH = () => `https://graph.facebook.com/${VERSION()}`;
 const STALE_MS = 60 * 60 * 1000;
+const DAY = 86400000;
+const MAX_MEDIA = () => Math.min(300, Number(process.env.META_SYNC_MAX) || 150);
 
 export const metaConfigured = () => Boolean(process.env.META_ACCESS_TOKEN && process.env.META_IG_USER_ID);
 
@@ -46,22 +48,26 @@ async function insightsFor(media) {
     ['reach', 'saved', 'shares', 'total_interactions'],
     ['reach']
   ];
+  let m = {};
   for (const metrics of attempts) {
     try {
-      const m = metricMap(await graph(`${media.id}/insights`, { metric: metrics.join(',') }));
-      if (isReel) {
-        try {
-          Object.assign(m, metricMap(await graph(`${media.id}/insights`, { metric: 'ig_reels_avg_watch_time' })));
-        } catch {
-          /* optional */
-        }
-      }
-      return m;
+      m = metricMap(await graph(`${media.id}/insights`, { metric: metrics.join(',') }));
+      break;
     } catch (e) {
       if (e.code === 190) throw e; // token problem: stop, do not retry smaller sets
     }
   }
-  return {};
+  // Optional extras, each in its own call so one unsupported metric cannot take the main numbers down.
+  const extras = ['profile_visits,follows'];
+  if (isReel) extras.push('ig_reels_avg_watch_time');
+  for (const metric of extras) {
+    try {
+      Object.assign(m, metricMap(await graph(`${media.id}/insights`, { metric })));
+    } catch (e) {
+      if (e.code === 190) throw e;
+    }
+  }
+  return m;
 }
 
 /** Match an Instagram media item to one of our posts by the start of the caption. */
@@ -71,79 +77,151 @@ function matchPost(media, posts) {
   return posts.find((p) => normalise(p.copy?.captions?.instagram).slice(0, 50) === cap)?.id ?? null;
 }
 
-let running = null;
+async function listMedia() {
+  const out = [];
+  let after;
+  while (out.length < MAX_MEDIA()) {
+    const page = await graph(`${process.env.META_IG_USER_ID}/media`, {
+      fields: 'id,caption,media_type,media_product_type,permalink,timestamp,like_count,comments_count,thumbnail_url,media_url',
+      limit: '50',
+      ...(after ? { after } : {})
+    });
+    out.push(...(page.data || []));
+    after = page.paging?.cursors?.after;
+    if (!page.paging?.next || !after) break;
+  }
+  return out.slice(0, MAX_MEDIA());
+}
+
+// Early snapshots (about 1, 3 and 7 days after posting) allow fair comparisons between posts of different age.
+const SNAPSHOT_WINDOWS = [
+  [1, 0.75, 2],
+  [3, 2.5, 4.5],
+  [7, 6.5, 10]
+];
+
+let lastError = null;
+let lastSyncAt = null;
 
 async function runSync() {
-  const list = await graph(`${process.env.META_IG_USER_ID}/media`, {
-    fields: 'id,caption,media_type,media_product_type,permalink,timestamp,like_count,comments_count,thumbnail_url,media_url',
-    limit: '40'
-  });
-  const media = list.data || [];
+  const media = await listMedia();
   const posts = await q("select id, copy from posts where copy is not null and status in ('scheduled','published','approved','draft_created','rendered')");
+  const known = new Map((await q('select media_id, synced_at from post_insights')).map((r) => [r.media_id, new Date(r.synced_at).getTime()]));
   let n = 0;
   for (let i = 0; i < media.length; i += 4) {
     const batch = media.slice(i, i + 4);
-    const results = await Promise.all(batch.map((m) => insightsFor(m)));
+    const results = await Promise.all(
+      batch.map((m) => {
+        const age = (Date.now() - new Date(m.timestamp).getTime()) / DAY;
+        // Old posts barely change: look at them once a day only.
+        if (age >= 30 && known.has(m.id) && Date.now() - known.get(m.id) < DAY) return null;
+        return insightsFor(m);
+      })
+    );
     for (let j = 0; j < batch.length; j++) {
       const m = batch[j];
       const x = results[j];
+      if (!x) continue;
       await q(
-        `insert into post_insights (media_id, post_id, permalink, media_type, product_type, caption, posted_at, views, reach, likes, comments, saved, shares, interactions, avg_watch_ms, thumbnail, synced_at)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16, now())
+        `insert into post_insights (media_id, post_id, permalink, media_type, product_type, caption, posted_at, views, reach, likes, comments, saved, shares, interactions, avg_watch_ms, profile_visits, follows, thumbnail, synced_at)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18, now())
          on conflict (media_id) do update set post_id = excluded.post_id, permalink = excluded.permalink, media_type = excluded.media_type, product_type = excluded.product_type, caption = excluded.caption,
            posted_at = excluded.posted_at, views = excluded.views, reach = excluded.reach, likes = excluded.likes, comments = excluded.comments, saved = excluded.saved, shares = excluded.shares,
-           interactions = excluded.interactions, avg_watch_ms = excluded.avg_watch_ms, thumbnail = excluded.thumbnail, synced_at = now()`,
-        [m.id, matchPost(m, posts), m.permalink, m.media_type, m.media_product_type, m.caption || null, m.timestamp, x.views ?? null, x.reach ?? null, x.likes ?? m.like_count ?? null, x.comments ?? m.comments_count ?? null, x.saved ?? null, x.shares ?? null, x.total_interactions ?? null, x.ig_reels_avg_watch_time ?? null, m.thumbnail_url || m.media_url || null]
+           interactions = excluded.interactions, avg_watch_ms = excluded.avg_watch_ms, profile_visits = excluded.profile_visits, follows = excluded.follows, thumbnail = excluded.thumbnail, synced_at = now()`,
+        [m.id, matchPost(m, posts), m.permalink, m.media_type, m.media_product_type, m.caption || null, m.timestamp, x.views ?? null, x.reach ?? null, x.likes ?? m.like_count ?? null, x.comments ?? m.comments_count ?? null, x.saved ?? null, x.shares ?? null, x.total_interactions ?? null, x.ig_reels_avg_watch_time ?? null, x.profile_visits ?? null, x.follows ?? null, m.thumbnail_url || m.media_url || null]
       );
+      const age = (Date.now() - new Date(m.timestamp).getTime()) / DAY;
+      for (const [bucket, lo, hi] of SNAPSHOT_WINDOWS) {
+        if (age >= lo && age < hi) {
+          await q(
+            `insert into post_insight_snapshots (media_id, bucket_days, views, reach, likes, comments, saved, shares, profile_visits, follows)
+             values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) on conflict (media_id, bucket_days) do nothing`,
+            [m.id, bucket, x.views ?? null, x.reach ?? null, x.likes ?? m.like_count ?? null, x.comments ?? m.comments_count ?? null, x.saved ?? null, x.shares ?? null, x.profile_visits ?? null, x.follows ?? null]
+          );
+        }
+      }
       n++;
     }
   }
   return n;
 }
 
+let running = null;
+/** One sync at a time. Never rejects: problems end up in lastError and are shown in the dashboard. */
+function startSync() {
+  running ??= runSync()
+    .then(() => {
+      lastError = null;
+      lastSyncAt = Date.now();
+    })
+    .catch((e) => {
+      lastError = { message: String(e.message || e).slice(0, 300), code: e.code ?? null, tokenExpired: e.code === 190 };
+      console.error('Instagram insights sync failed:', lastError.message);
+    })
+    .finally(() => {
+      running = null;
+    });
+  return running;
+}
+
 let tableReady = null;
 export function ensureInsightsTable() {
-  tableReady ??= q(`create table if not exists post_insights (
-    media_id text primary key,
-    post_id int references posts(id) on delete set null,
-    permalink text, media_type text, product_type text, caption text, posted_at timestamptz,
-    views int, reach int, likes int, comments int, saved int, shares int, interactions int, avg_watch_ms int,
-    thumbnail text, synced_at timestamptz not null default now()
-  )`).catch((e) => {
+  tableReady ??= (async () => {
+    await q(`create table if not exists post_insights (
+      media_id text primary key,
+      post_id int references posts(id) on delete set null,
+      permalink text, media_type text, product_type text, caption text, posted_at timestamptz,
+      views int, reach int, likes int, comments int, saved int, shares int, interactions int, avg_watch_ms int,
+      thumbnail text, synced_at timestamptz not null default now()
+    )`);
+    await q('alter table post_insights add column if not exists profile_visits int');
+    await q('alter table post_insights add column if not exists follows int');
+    await q(`create table if not exists post_insight_snapshots (
+      media_id text not null references post_insights(media_id) on delete cascade,
+      bucket_days int not null,
+      taken_at timestamptz not null default now(),
+      views int, reach int, likes int, comments int, saved int, shares int, profile_visits int, follows int,
+      primary key (media_id, bucket_days)
+    )`);
+  })().catch((e) => {
     tableReady = null;
     throw e;
   });
   return tableReady;
 }
 
-/** Returns the stored per-post numbers, refreshing from Meta when they are older than an hour (or on demand). */
-export async function postInsights({ refresh = false } = {}) {
+/**
+ * Stored per-post numbers. Refreshes from Meta on demand, or in the background when older than an hour
+ * (the dashboard never waits for Meta once there is something to show).
+ * days: only posts of the last N days (0 or null: everything).
+ */
+export async function postInsights({ refresh = false, days = 90, limit = 100 } = {}) {
   if (!metaConfigured()) return { configured: false, posts: [] };
   await ensureInsightsTable();
-  let error = null;
-  const last = (await q('select max(synced_at) as t from post_insights'))[0]?.t;
-  const stale = !last || Date.now() - new Date(last).getTime() > STALE_MS;
-  if (refresh || stale) {
-    try {
-      running ??= runSync().finally(() => {
-        running = null;
-      });
-      await running;
-    } catch (e) {
-      error = { message: String(e.message || e).slice(0, 300), code: e.code ?? null, tokenExpired: e.code === 190 };
-    }
-  }
+  const last = (await q('select max(synced_at) as t, count(*)::int as n from post_insights'))[0];
+  const stale = !last.t || Date.now() - new Date(last.t).getTime() > STALE_MS;
+  if (refresh || last.n === 0) await startSync();
+  else if (stale) startSync();
+
+  const d = Number(days) > 0 ? Number(days) : null;
+  const lim = Math.min(300, Math.max(1, Number(limit) || 100));
   const rows = await q(
     `select i.*, p.format, p.pillar, p.property_key, p.plan_date,
             (select count(*)::int from clicks c where c.post_id = i.post_id and not c.is_bot) as clicks
        from post_insights i left join posts p on p.id = i.post_id
-      order by i.posted_at desc nulls last limit 60`
+      where ($1::int is null or i.posted_at >= now() - ($1::int * interval '1 day'))
+      order by i.posted_at desc nulls last limit $2`,
+    [d, lim]
   );
+  const total = (await q('select count(*)::int as n from post_insights where ($1::int is null or posted_at >= now() - ($1::int * interval \'1 day\'))', [d]))[0].n;
   const syncedAt = (await q('select max(synced_at) as t from post_insights'))[0]?.t ?? null;
   return {
     configured: true,
     syncedAt,
-    error,
+    refreshing: Boolean(running),
+    error: lastError,
+    days: d ?? 0,
+    total,
     posts: rows.map((r) => {
       const eng = (r.likes || 0) + (r.comments || 0) + (r.saved || 0) + (r.shares || 0);
       return {
@@ -159,6 +237,8 @@ export async function postInsights({ refresh = false } = {}) {
         saved: r.saved,
         shares: r.shares,
         interactions: r.interactions,
+        profileVisits: r.profile_visits,
+        follows: r.follows,
         avgWatchSeconds: r.avg_watch_ms ? Math.round(r.avg_watch_ms / 100) / 10 : null,
         engagementRate: r.reach ? Math.round((eng / r.reach) * 1000) / 10 : null,
         thumbnail: r.thumbnail,
@@ -188,9 +268,23 @@ export async function metaAccounts() {
   }
 }
 
+/** Hourly refresh so early snapshots (1, 3, 7 days) are taken even when nobody opens the dashboard. */
+function startScheduler() {
+  if (globalThis.__insightsTimer || !metaConfigured() || !dbEnabled()) return;
+  const tick = () => ensureInsightsTable().then(() => startSync()).catch((e) => console.error('Insights scheduler:', e.message));
+  setTimeout(tick, 90 * 1000).unref();
+  globalThis.__insightsTimer = setInterval(tick, STALE_MS);
+  globalThis.__insightsTimer.unref();
+}
+
 // Analytics routes: per-post Instagram numbers, Meta account helper and the audience planner.
 export function insightsRoutes(app, needDb, ah) {
-  app.get('/stats/posts', needDb, ah(async (req, res) => res.json(await postInsights({ refresh: req.query.refresh === '1' }))));
+  startScheduler();
+  app.get('/stats/posts', needDb, ah(async (req, res) => {
+    const raw = String(req.query.days ?? '90').toLowerCase();
+    const days = raw === 'alle' || raw === 'all' ? 0 : Number(raw);
+    res.json(await postInsights({ refresh: req.query.refresh === '1', days: Number.isFinite(days) ? days : 90, limit: req.query.limit }));
+  }));
   audienceRoutes(app, needDb, ah);
   app.get('/stats/meta/accounts', ah(async (_req, res) => res.json(await metaAccounts())));
 }
