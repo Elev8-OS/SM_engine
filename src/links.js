@@ -6,8 +6,10 @@ const FALLBACK = 'https://www.elevate-villas.com';
 const clean = (s, d) => (/^[a-z0-9_]{1,30}$/i.test(String(s || '')) ? String(s) : d);
 
 /**
- * Public tracked link, used as the link in bio or in ads: /go/latest or /go/<postId>.
- * It records the click and redirects to the villa page with UTM parameters. It must never fail the visitor.
+ * Public tracked link: /go/bio (link in bio), /go/<postId> (one post, for stories, DMs or ads) or /go/latest.
+ * /go/bio sends visitors to the main page, because one bio link cannot tell which post brought them.
+ * The others redirect to the villa page of that post (latest = most recent scheduled or published post).
+ * It records the click and must never fail the visitor.
  */
 export async function goHandler(req, res) {
   const source = clean(req.query.s, 'instagram');
@@ -18,7 +20,7 @@ export async function goHandler(req, res) {
       const id = req.params.id;
       if (/^\d+$/.test(id)) {
         post = (await q('select * from posts where id = $1', [Number(id)]))[0] || null;
-      } else {
+      } else if (id !== 'bio') {
         post = (await q("select * from posts where status in ('scheduled','published') and scheduled_for <= now() order by scheduled_for desc limit 1"))[0] || null;
       }
     }
