@@ -130,22 +130,41 @@ export async function listUsers() {
   return { ok: true, users };
 }
 
-/** Analytics of the connected accounts from GHL (last 7 days against the 7 days before). Raw GHL answer inside data. */
+const messageOf = (r) => {
+  const m = r && (r.message ?? r.error ?? r.msg);
+  return m ? (Array.isArray(m) ? m.join('; ') : String(m)).slice(0, 200) : null;
+};
+
+/**
+ * Analytics of the connected accounts from GHL (last 7 days against the 7 days before). Raw GHL answer inside data.
+ * On a problem the answer says where it went wrong (where) and what GHL said (message), so a bare status code is never all there is.
+ */
 export async function getStatistics() {
   const loc = process.env.GHL_LOCATION_ID;
+  const fail = (where, status, response, extra = {}) => {
+    console.error('GHL statistics failed', where, status, JSON.stringify(response ?? {}).slice(0, 300));
+    return { ok: false, status, where, message: messageOf(response), ...extra };
+  };
   const accRes = await fetch(`${BASE}/social-media-posting/${loc}/accounts`, { headers: headers(), signal: AbortSignal.timeout(30000) });
   const accJson = await accRes.json().catch(() => ({}));
-  if (!accRes.ok) return { ok: false, status: accRes.status, response: accJson };
-  const accs = (accJson?.results?.accounts || []).filter((a) => a.active && !a.isExpired);
+  if (!accRes.ok) return fail('accounts', accRes.status, accJson);
+  const all = accJson?.results?.accounts || [];
+  const accs = all.filter((a) => a.active && !a.isExpired);
   const profileIds = [...new Set(accs.map((a) => a.profileId).filter(Boolean))];
   const platforms = [...new Set(accs.map((a) => a.platform).filter(Boolean))];
-  if (!profileIds.length) return { ok: false, status: 404, response: { error: 'No active social accounts' } };
-  const res = await fetch(`${BASE}/social-media-posting/statistics?locationId=${encodeURIComponent(loc)}`, {
-    method: 'POST',
-    headers: headers(),
-    body: JSON.stringify({ profileIds, platforms }),
-    signal: AbortSignal.timeout(60000)
-  });
+  if (!profileIds.length) {
+    return fail('no_accounts', 404, { message: `GHL lists ${all.length} connected accounts, none of them active and valid` }, { accounts: all.map((a) => ({ platform: a.platform, active: a.active, expired: a.isExpired })) });
+  }
+  const call = (withLocation) =>
+    fetch(`${BASE}/social-media-posting/statistics${withLocation ? `?locationId=${encodeURIComponent(loc)}` : ''}`, {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({ profileIds, platforms }),
+      signal: AbortSignal.timeout(60000)
+    });
+  let res = await call(true);
+  if (res.status === 404) res = await call(false); // some tokens resolve the location without the query parameter
   const data = await res.json().catch(() => ({}));
-  return { ok: res.ok, status: res.status, platforms, data: res.ok ? data : undefined, response: res.ok ? undefined : data };
+  if (!res.ok) return fail('statistics', res.status, data, { platforms });
+  return { ok: true, status: res.status, platforms, data };
 }
