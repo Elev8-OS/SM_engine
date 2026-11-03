@@ -2,6 +2,7 @@ import { q } from './db.js';
 import { HttpError } from './util.js';
 import { slotFor, PILLARS, RULES, COPY_SCHEMA } from './strategy.js';
 import { AREAS } from './seed.js';
+import { activeGuidance } from './learnings.js';
 
 const HERO_ROOMS = ['pool', 'exterior', 'view', 'terrace'];
 const DETAIL_ROOMS = ['detail', 'bathroom', 'kitchen', 'living', 'bedroom', 'pool'];
@@ -117,6 +118,7 @@ export async function planNext(date, { propertyKey } = {}) {
   if (!picked) throw new Error('No property has enough approved photos for this format yet');
 
   const areas = [...new Set(picked.props.map((p) => p.area))];
+  const guidance = await activeGuidance(); // rules the team approved in Orbit (Learnings)
   const plan = {
     planDate,
     format: slot.format,
@@ -125,7 +127,8 @@ export async function planNext(date, { propertyKey } = {}) {
     properties: picked.props.map(factsOf),
     photos: picked.photos.map(photoOut),
     areaFacts: pillar === 'neighbourhood' ? Object.fromEntries(areas.map((a) => [a, AREAS[a] || []])) : undefined,
-    rules: RULES,
+    rules: [...RULES, ...guidance.rules],
+    learningIds: guidance.ids.length ? guidance.ids : undefined,
     copySchema: COPY_SCHEMA
   };
   const rows = await q(
