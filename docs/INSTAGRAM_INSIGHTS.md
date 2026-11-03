@@ -1,48 +1,58 @@
-# Instagram-Zahlen pro Beitrag (Meta Graph API)
+# Instagram-Zahlen pro Beitrag und Anzeigen (Meta)
 
 Der SM Manager zeigt im Tab "Kennzahlen" unter "Einzelne Beiträge", wie jeder Beitrag lief (Aufrufe, Reichweite,
 Likes, Kommentare, Gespeichert, Geteilt, Interaktionsrate) und ordnet ihn unseren Beiträgen und den Klicks auf den
-getrackten Link zu. Die Zahlen kommen direkt von Meta. Dafür braucht die Engine zwei Variablen:
+getrackten Link zu. Die Zahlen kommen direkt von Meta. Dieselbe Meta-App und dasselbe Token dienen später für Anzeigen.
 
-| Variable | Wert |
+| Variable (Railway, Dienst render-service) | Wert |
 |---|---|
-| `META_ACCESS_TOKEN` | Zugriffs-Token einer Facebook-Seite (läuft nicht ab, wenn es aus einem langlebigen User-Token entsteht) |
-| `META_IG_USER_ID` | Kennung des Instagram-Business-Kontos `elevate_villas` |
+| `META_ACCESS_TOKEN` | Token des Systemnutzers "Elev8 Growth" (läuft nie ab) |
+| `META_IG_USER_ID` | `17841462424236117` (Instagram-Konto `elevate_villas`, aus der GHL-Verbindung übernommen) |
+| `META_GRAPH_VERSION` | optional, Standard `v22.0` |
 
-Optional: `META_GRAPH_VERSION` (Standard `v22.0`).
+## So wurde es eingerichtet
 
-## Einrichtung (einmalig, ca. 20 Minuten)
+1. **Meta-App** "Elev8 Growth" auf developers.facebook.com, verbunden mit dem verifizierten Business-Portfolio
+   "Elevate Investments". Anwendungsfälle: *Messaging und Content auf Instagram verwalten*, *Alles auf deiner Seite
+   verwalten*, *Werbeanzeigen mit Marketing API erstellen und verwalten*. Die App bleibt im Entwicklungsmodus,
+   eine App-Review ist nicht nötig, solange nur Personen mit einer Rolle in der App sie nutzen.
+2. **Berechtigungen** unter *Anwendungsfall personalisieren* hinzugefügt: `instagram_basic`, `instagram_manage_insights`,
+   `instagram_content_publish`, `instagram_manage_comments` (Instagram) sowie die schon vorhandenen
+   `pages_show_list`, `pages_read_engagement`, `ads_management`, `ads_read`, `business_management`.
+3. **Systemnutzer** "Elev8 Growth" im Business-Portfolio (*Einstellungen, Nutzer, Systemnutzer*), Mitarbeiter-Zugriff,
+   mit den Assets: Facebook-Seite *Elevate Villas Bali*, Instagram-Konto `elevate_villas`, Werbekonto *Elevate Villas*.
+   Der Systemnutzer ist der App unter *Konten, Apps* zugewiesen.
+4. **Token** über *Systemnutzer, Elev8 Growth, Token generieren*: App *Elev8 Growth*, Ablauf *nie*, Berechtigungen
+   `instagram_basic`, `instagram_manage_insights`, `pages_show_list`, `pages_read_engagement`, `read_insights`
+   und für Anzeigen `ads_management`, `ads_read`, `business_management`.
+   Meta verlangt dafür die **Genehmigung einer zweiten Person** mit Admin-Rechten im Portfolio (Vier-Augen-Prinzip,
+   gültig 7 Tage). Danach zeigt Meta das Token **einmal** an. Direkt in Railway als `META_ACCESS_TOKEN` eintragen,
+   niemals in Chats oder Tickets einfügen.
+5. In Orbit unter *SM Manager, Kennzahlen* prüfen, ob "Einzelne Beiträge" gefüllt ist.
 
-Voraussetzung: `elevate_villas` ist ein Business-Konto und mit einer Facebook-Seite verknüpft. Das ist der Fall,
-sonst würde die Verbindung zu GoHighLevel nicht funktionieren.
+## Sicherheit
 
-1. **Meta-App anlegen.** Auf <https://developers.facebook.com> unter *Meine Apps* eine neue App erstellen
-   (Typ *Business*, Name zum Beispiel "R Villas Insights"). Mit dem Facebook-Konto anmelden, das die Seite verwaltet.
-2. **Instagram-Produkt hinzufügen.** Im App-Dashboard das Produkt für die Instagram-Graph-API hinzufügen
-   (je nach Oberfläche "Instagram", "Instagram API" oder "Instagram Graph API", die Variante mit Facebook-Login).
-3. **Token erzeugen.** Im *Graph API Explorer* (<https://developers.facebook.com/tools/explorer>):
-   - Oben rechts die neue App wählen, Typ *User Token*.
-   - Berechtigungen hinzufügen: `instagram_basic`, `instagram_manage_insights`, `pages_show_list`, `pages_read_engagement`.
-   - *Generate Access Token*, im Dialog die Seite und das Instagram-Konto `elevate_villas` auswählen und bestätigen.
-4. **Langlebig machen.** Das Token im *Access Token Debugger* (<https://developers.facebook.com/tools/debug/accesstoken>)
-   einfügen und unten *Extend Access Token* wählen. Das neue Token gilt 60 Tage.
-5. **Seiten-Token holen.** Im Graph API Explorer mit dem langlebigen Token die Abfrage `me/accounts` ausführen.
-   Beim Eintrag der Seite steht ein `access_token`. Dieses Seiten-Token läuft nicht ab. Es ist der Wert für `META_ACCESS_TOKEN`.
-6. **In Railway eintragen** (Projekt SM_engine, Dienst render-service, Reiter Variables): `META_ACCESS_TOKEN`.
-7. **Instagram-ID finden.** Mit gesetztem Token liefert die Engine unter `/stats/meta/accounts` (mit `x-api-key`)
-   die Seiten und die zugehörige `instagram_id`. Diese als `META_IG_USER_ID` eintragen.
-8. In Orbit unter *SM Manager, Kennzahlen* prüfen, ob die Tabelle gefüllt ist.
+- Mit `ads_management` kann das Token Geld ausgeben. Im Werbekonto ein **Ausgabenlimit** setzen. Die Engine legt
+  Kampagnen nur als pausierte Entwürfe an, aktiviert wird nach Freigabe in Orbit.
+- Wird das Token ungültig oder widerrufen, zeigt der Tab eine Meldung und die zuletzt gespeicherten Zahlen.
+  Dann ein neues Token erzeugen (Schritt 4) und in Railway ersetzen.
+- Bestehende Systemnutzer im Portfolio (zum Beispiel "Elevate Villas Bali") nicht anfassen, sie gehören zu anderen
+  Integrationen. Auf keinen Fall deren Tokens widerrufen.
+
+## Ausweichweg (nur falls der Systemnutzer nicht geht)
+
+Token im *Graph API Explorer* (<https://developers.facebook.com/tools/explorer>) mit den Rechten `instagram_basic`,
+`instagram_manage_insights`, `pages_show_list`, `pages_read_engagement` erzeugen, im *Access Token Debugger*
+(<https://developers.facebook.com/tools/debug/accesstoken>) mit *Extend Access Token* verlängern und dann mit
+`me/accounts` das Token der Seite holen. Dieses Seiten-Token läuft nach Metas Beschreibung nicht ab, wenn es aus einem
+langlebigen Token entsteht.
 
 ## Hinweise
 
-- Solange die Meta-App im Entwicklungsmodus ist, funktioniert sie für Konten, bei denen du eine Rolle in der App hast.
-  Für das eigene Konto ist keine App-Prüfung durch Meta nötig.
-- Token niemals in Chats oder Tickets einfügen, nur direkt in Railway.
-- Läuft das Token ab oder wird es widerrufen, zeigt der Tab eine Meldung und die zuletzt gespeicherten Zahlen.
-  Dann Schritt 3 bis 6 wiederholen.
 - Die Zahlen werden höchstens stündlich bei Meta abgefragt und in der Tabelle `post_insights` gespeichert.
   Zuordnung zu unseren Beiträgen: Die Engine vergleicht den Anfang der Caption. Von Hand gepostete Beiträge erscheinen
   trotzdem, aber ohne Villa und Klicks.
+- Hilfsaufruf: `GET /stats/meta/accounts` (mit `x-api-key`) zeigt die Seiten und Instagram-Konten, die das Token sieht.
 - Kennzahlen (Stand Meta 2026): Aufrufe (`views`), Reichweite (`reach`), Gespeichert (`saved`), Geteilt (`shares`),
   Interaktionen (`total_interactions`), bei Reels zusätzlich die durchschnittliche Sehdauer.
-  Gelieferte Kennzahlen können sich je nach Beitragstyp unterscheiden. Fehlt eine, bleibt das Feld leer.
+  Je nach Beitragstyp liefert Meta nicht alle Kennzahlen. Fehlt eine, bleibt das Feld leer.
