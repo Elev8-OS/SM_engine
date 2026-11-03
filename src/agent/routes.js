@@ -5,6 +5,7 @@ import { factsFor } from '../facts.js';
 import { runAgent } from './run.js';
 import { TOOLS, systemPrompt, availabilityFrom, priceSummary, isDate, nightsBetween } from './tools.js';
 import { villaView, linkResult, withFees } from './villas.js';
+import { convert } from './currency.js';
 import { readGuest, whyEmpty } from './read.js';
 import { loadSettings, saveSettings, settingsView, mayAutoSend } from './settings.js';
 import { notifyConfigured, buildMail, sendMail } from './notify.js';
@@ -105,6 +106,7 @@ export async function execute(name, input) {
     const rows = await q('select key, name, area, type, guests, size_m2, bedrooms, url, highlights, open_questions from properties order by key');
     return rows.map((p) => villaView(p, MULTI_UNIT.has(p.key)));
   }
+  if (name === 'convert_currency') return convert(input);
   if (name === 'build_booking_link') {
     const p = await villa(input.villa);
     checkDates(input);
