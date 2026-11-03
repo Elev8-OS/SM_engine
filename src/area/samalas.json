@@ -1,0 +1,63 @@
+{
+  "key": "samalas",
+  "area": "Pererenan",
+  "updated": "2026-11-03",
+  "source": "Elev8 area guide for The R Villa Samalas (Pererenan-Guide-Villa-Samalas) and the Greater Canggu restaurant guide, November 2026. Distances are calculated from the villa coordinates. No prices, ratings or opening hours are stored on purpose: they change and must never appear in a post.",
+  "honest": [
+    "The sea at Pererenan Beach and Echo Beach is not for swimming: heavy shore break, strong currents, no lifeguards. Never write about swimming in the ocean. For swimming the guests have the villa pool, or a beach club pool.",
+    "The villa is not on the beach. Pererenan Beach is about 2.5 km away, about 7 minutes by scooter. It is good for sunset, a long walk and watching the surf.",
+    "The villa sits in a quiet residential lane. Coffee, a shop and a spa are within a few minutes on foot. For everything else guests use a scooter, Grab or a driver. Never suggest walking after dark.",
+    "Pererenan is a working village with a cafe and wellness scene, not a resort strip with a promenade.",
+    "Opening hours, prices and ratings change. Never quote them."
+  ],
+  "seasons": [
+    "April to October is the dry season. May, June, September and October are the sweet spot: reliable sun, fewer crowds than July and August.",
+    "November to March is the wet season: usually a heavy afternoon downpour, not all-day rain. Lush green rice fields, fewer people, lower prices. January and February are the wettest months.",
+    "Nyepi (the Balinese day of silence) falls in early March 2027. The exact date is to be confirmed. The island stops for 24 hours. Do not promise anything for those days."
+  ],
+  "spots": [
+    { "name": "Shortcut Cafe Canggu", "kind": "cafe", "walkMin": 3, "note": "the closest coffee and breakfast", "audience": ["everyone"] },
+    { "name": "Day by Day Coffee & Eatery", "kind": "cafe", "walkMin": 7, "note": "small, breakfast and lunch", "audience": ["couples", "remote workers"] },
+    { "name": "Solace Spa Pererenan", "kind": "spa", "walkMin": 7, "note": "massage", "audience": ["couples", "wellness"] },
+    { "name": "NOAH cafe", "kind": "cafe", "walkMin": 8, "note": "cafe with coworking, easy for a few hours with a laptop", "audience": ["remote workers"] },
+    { "name": "TheHub Pererenan", "kind": "coworking", "walkMin": 9, "note": "desks and meeting rooms", "audience": ["remote workers"] },
+    { "name": "The Hula", "kind": "cafe", "walkMin": 11, "note": "family-friendly all-day cafe", "audience": ["families"] },
+    { "name": "Warung Yess", "kind": "warung", "walkMin": 12, "note": "local buffet-style nasi campur", "audience": ["everyone", "families"] },
+    { "name": "Warung Local", "kind": "warung", "walkMin": 13, "note": "the best-known local warung in the area", "audience": ["everyone"] },
+    { "name": "Cinta Pererenan", "kind": "cafe", "walkMin": 15, "note": "works for breakfast and the evening", "audience": ["couples"] },
+    { "name": "Suchata Bali Massage", "kind": "massage", "note": "comes to the villa (home service), easy for a group", "audience": ["groups", "couples", "wellness"] },
+    { "name": "Gather brunch cafe", "kind": "cafe", "walkMin": 16, "note": "brunch and juices", "audience": ["couples", "families"] },
+    { "name": "Canggu Yoga Centre", "kind": "yoga", "walkMin": 16, "note": "drop-in classes", "audience": ["wellness"] },
+    { "name": "LOOP cafe", "kind": "cafe", "walkMin": 17, "note": "early opening, good for surfers", "audience": ["surfers"] },
+    { "name": "Warung Apa?", "kind": "warung", "walkMin": 17, "note": "smaller and quieter warung", "audience": ["everyone"] },
+    { "name": "Mission Flow Studio", "kind": "yoga", "walkMin": 19, "note": "yoga and movement classes", "audience": ["wellness"] },
+    { "name": "The Path Wellness Center", "kind": "yoga", "walkMin": 19, "note": "yoga, sauna and spa under one roof", "audience": ["wellness"] },
+    { "name": "Warung Sika", "kind": "warung", "walkMin": 19, "note": "long-standing local favourite", "audience": ["everyone"] },
+    { "name": "Brunch Club Pererenan", "kind": "cafe", "walkMin": 20, "note": "big, busy brunch place, known for its pancakes", "audience": ["families", "groups"] },
+    { "name": "Pererenan Beach", "kind": "beach", "walkMin": 34, "scooterMin": 7, "note": "black sand, sunset, a drink at a beach bar. Not for swimming.", "audience": ["couples", "everyone"] },
+    { "name": "Hippie Fish", "kind": "restaurant", "scooterMin": 7, "note": "seafood on Pererenan Beach, the obvious sunset dinner", "audience": ["couples"] },
+    { "name": "Papi Chulo Beachfront", "kind": "beach bar", "where": "Pererenan Beach", "note": "relaxed sunset drinks right on the sand", "audience": ["couples", "groups"] },
+    { "name": "Echo Beach", "kind": "beach", "distanceKm": 1.9, "note": "sunset with the surfers in the water. Not for swimming.", "audience": ["everyone", "surfers"] },
+    { "name": "La Brisa Bali", "kind": "beach club", "distanceKm": 1.8, "note": "built from reclaimed fishing boats, pool, food and sunset", "audience": ["couples", "groups"] },
+    { "name": "COMO Beach Club Canggu", "kind": "beach club", "distanceKm": 1.9, "note": "calmer and smarter, a quiet day by a pool", "audience": ["couples", "families"] },
+    { "name": "FINNS Beach Club", "kind": "beach club", "distanceKm": 2.8, "note": "multiple pools, big and lively, a waterpark next door", "audience": ["families", "groups"] },
+    { "name": "Batu Bolong", "kind": "surf", "distanceKm": 2.5, "note": "the gentle wave where most people in Canggu learn to surf", "audience": ["surfers", "families"] },
+    { "name": "ZALI Pererenan", "kind": "restaurant", "where": "Pererenan", "note": "Lebanese, good for a group", "audience": ["groups"] },
+    { "name": "Riviera Trattoria Pererenan", "kind": "restaurant", "where": "Pererenan", "note": "Italian, pizza and a cocktail bar", "audience": ["couples", "groups"] },
+    { "name": "Kilo Kitchen Pererenan", "kind": "restaurant", "where": "Pererenan", "note": "modern Asian", "audience": ["couples"] },
+    { "name": "HOME by Chef Wayan", "kind": "restaurant", "where": "Pererenan", "note": "modern Indonesian and Balinese cooking, small and intimate", "audience": ["couples"] },
+    { "name": "Shelter Restaurant Pererenan", "kind": "restaurant", "where": "Pererenan", "note": "Mediterranean from a charcoal grill, sharing plates", "audience": ["groups", "couples"] },
+    { "name": "WOODS Pererenan", "kind": "restaurant", "where": "Pererenan", "note": "all-day restaurant in a striking green building", "audience": ["couples", "families", "groups"] },
+    { "name": "Bar Vera Bistro & Wine Bar", "kind": "wine bar", "where": "Pererenan", "note": "French-style bistro and a good wine list", "audience": ["couples"] },
+    { "name": "Tanah Lot", "kind": "sight", "distanceKm": 6, "note": "the sea temple, closest major sight. Best early morning or at sunset.", "audience": ["everyone"] },
+    { "name": "Pura Taman Ayun", "kind": "sight", "distanceKm": 9, "note": "UNESCO-listed royal temple in water gardens, far quieter than Tanah Lot", "audience": ["couples", "families"] }
+  ],
+  "practical": [
+    { "name": "Circle K Sempol Pererenan", "kind": "shop", "walkMin": 3, "note": "24-hour convenience store: water, snacks, SIM top-up" },
+    { "name": "ATM Mandiri", "kind": "atm", "walkMin": 5 },
+    { "name": "Frestive Supermarket Batu Bolong", "kind": "supermarket", "walkMin": 12 },
+    { "name": "Pepito Market Echo Beach", "kind": "supermarket", "walkMin": 13, "note": "larger range, imported goods" },
+    { "name": "MISSION Medical Pererenan", "kind": "clinic", "walkMin": 12, "note": "walk-in clinic, 24 hours" },
+    { "name": "Apotek Jati Farma Canggu", "kind": "pharmacy", "walkMin": 12, "note": "24 hours" }
+  ]
+}

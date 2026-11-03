@@ -50,6 +50,28 @@ export function priceSummary(rows, checkIn, checkOut, currency) {
   };
 }
 
+// Query parameters the booking page reads. Dates are YYYY-MM-DD.
+export const BOOKING_PARAMS = { checkIn: 'check_in_date', checkOut: 'check_out_date', adults: 'number_of_adult', children: 'number_of_children' };
+export const DM_UTM = { utm_source: 'instagram', utm_medium: 'dm', utm_campaign: 'agent' };
+
+/** Booking page link of a villa with the stay already filled in. Throws a readable error on bad input. */
+export function bookingLink(baseUrl, { checkIn, checkOut, adults, children = 0 } = {}, extra = {}) {
+  if (!baseUrl) throw new Error('This villa has no booking page yet. The team shares the link.');
+  if (!isDate(checkIn) || !isDate(checkOut)) throw new Error('check_in and check_out must be YYYY-MM-DD');
+  if (checkOut <= checkIn) throw new Error('check_out must be after check_in');
+  const a = Number(adults);
+  const c = Number(children ?? 0);
+  if (!Number.isInteger(a) || a < 1 || a > 30) throw new Error('adults must be a whole number of at least 1');
+  if (!Number.isInteger(c) || c < 0 || c > 20) throw new Error('children must be a whole number, 0 or more');
+  const u = new URL(baseUrl);
+  u.searchParams.set(BOOKING_PARAMS.checkIn, checkIn);
+  u.searchParams.set(BOOKING_PARAMS.checkOut, checkOut);
+  u.searchParams.set(BOOKING_PARAMS.adults, String(a));
+  u.searchParams.set(BOOKING_PARAMS.children, String(c));
+  for (const [k, v] of Object.entries(extra)) u.searchParams.set(k, v);
+  return u.toString();
+}
+
 export const TOOLS = [
   {
     name: 'list_villas',
@@ -73,6 +95,22 @@ export const TOOLS = [
       type: 'object',
       properties: { villa: { type: 'string' }, check_in: { type: 'string', description: 'YYYY-MM-DD' }, check_out: { type: 'string', description: 'YYYY-MM-DD' } },
       required: ['villa', 'check_in', 'check_out'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'build_booking_link',
+    description: 'Booking link of a villa with the stay already filled in (check-in, check-out, adults, children). Use it instead of the plain booking_link once the villa, both dates and the guest numbers are known from the guest. Never guess a value. Share the returned booking_link exactly as it is.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        villa: { type: 'string', description: 'Villa key from list_villas' },
+        check_in: { type: 'string', description: 'YYYY-MM-DD' },
+        check_out: { type: 'string', description: 'YYYY-MM-DD, the departure day' },
+        adults: { type: 'integer', description: 'Number of adults (13 and older), at least 1' },
+        children: { type: 'integer', description: 'Number of children (2 to 12). 0 only if the guest said so or the group is clearly adults only.' }
+      },
+      required: ['villa', 'check_in', 'check_out', 'adults', 'children'],
       additionalProperties: false
     }
   },
@@ -108,8 +146,10 @@ export function systemPrompt(today) {
     '- A fact listed in uncertain_facts is not confirmed. Do not state it. Say the team confirms it.',
     '- Before saying a villa is free or not, call check_availability. Before naming a price, call get_prices for those exact dates. Quote only what the tools return and call it indicative: say the final price is shown on the booking page.',
     '- Mention the minimum stay when meets_minimum_stay is false or when it matters.',
-    '- If dates, number of guests or both are missing, ask for them in one short question instead of guessing. You may suggest villas that fit the guest count.',
-    '- To book, share the booking link of the villa from list_villas. Do not promise a booking, do not take payment details, do not hold dates.',
+    '- If dates, number of guests or both are missing, ask for them in one short question instead of guessing. Ask for adults and children together ("how many adults and how many children?"). You may suggest villas that fit the guest count.',
+    '- A group larger than the villa sleeps (guests in list_villas) does not fit: say so and suggest a villa that does, or hand over to the team.',
+    '- To book, share a booking link. Once the villa, check-in, check-out, the number of adults and the number of children are all known from the guest, call build_booking_link and share exactly the link it returns, because it opens the booking page with the stay already filled in. Otherwise share the booking_link from list_villas. Never guess a date or a number for the link; if only the number of children is unclear, ask. Check availability first and do not send a link for dates that are not available: offer other dates or another villa.',
+    '- Do not promise a booking, do not take payment details, do not hold dates.',
     '- Never give access codes, WiFi details or exact addresses.',
     '',
     'Hand over to a person (needs_human true, still write a short polite holding reply) for: complaints, refunds, existing bookings, payments, discount or price negotiation, groups, weddings and events, long stays of more than 28 nights, special requests that the facts do not cover, medical or legal topics, and anything you are unsure about.',

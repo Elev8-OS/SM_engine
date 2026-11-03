@@ -14,6 +14,8 @@
     { "text": "The plot is 300 m² and includes the garden, the pool and the pool deck. That is plot size, not living space. Never call it villa size or living area.", "status": "confirmed", "source": "owner, 2026-11-03" },
     { "text": "Private pool with a pool deck.", "status": "confirmed", "source": "owner, 2026-11-03", "tags": ["pool"] },
     { "text": "A garden that is part of the living area (outdoor living around the pool).", "status": "confirmed", "source": "owner, 2026-11-03", "tags": ["garden"] },
+    { "text": "In a quiet residential lane in Pererenan. A cafe, a 24-hour shop and a spa are a few minutes on foot (see the AREA list).", "status": "elev8", "source": "Elev8 area guide, 2026-11" },
+    { "text": "Pererenan Beach is about 2.5 km away, about 7 minutes by scooter. It is a beach for sunset and surf-watching, not for swimming (strong currents, no lifeguards). The villa is not beachfront.", "status": "elev8", "source": "Elev8 area guide, 2026-11 (the guide also names 1.9 km once; 2.5 km appears three times)" },
     { "text": "Single-level home.", "status": "elev8", "source": "Elev8 questionnaire" },
     { "text": "Air conditioning, WiFi, TV, safe, hair dryer, iron and ironing board.", "status": "elev8", "source": "Elev8 questionnaire" },
     { "text": "Kitchen with stove, microwave, coffee maker, toaster, blender, a refrigerator with freezer and a mini fridge; dining table.", "status": "elev8", "source": "Elev8 questionnaire" },
@@ -26,7 +28,8 @@
   ],
   "open": [
     "Living area in m² is not known. Do not state any size other than the 300 m² plot.",
-    "No view claims (rice fields, sunset, ocean) and no distance to the beach are confirmed.",
+    "No view claims (rice fields, sunset, ocean) are confirmed.",
+    "Never call the villa beachfront or say the sea is for swimming.",
     "Whether a crib and highchair are kept on site is unclear (the questionnaire says yes, the add-on says order in advance). Do not mention them.",
     "Hot tub, barbecue, gym, cinema and rooftop are not confirmed. Do not mention them."
   ]
