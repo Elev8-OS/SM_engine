@@ -1,10 +1,12 @@
 import crypto from 'node:crypto';
 import { q, dbEnabled } from '../db.js';
 import { HttpError } from '../util.js';
+import { factsFor } from '../facts.js';
 import { runAgent } from './run.js';
 import { TOOLS, systemPrompt, availabilityFrom, priceSummary, isDate, nightsBetween } from './tools.js';
-import { villaView, linkResult } from './villas.js';
+import { villaView, linkResult, withFees } from './villas.js';
 import { readGuest, whyEmpty } from './read.js';
+import { loadSettings, saveSettings, settingsView, mayAutoSend } from './settings.js';
 import { notifyConfigured, buildMail, sendMail } from './notify.js';
 import { callModel, elev8Tool, pricelabsRows, findConversation, getThread, sendInstagram, agentConfig, priceIds } from './clients.js';
 
@@ -33,6 +35,8 @@ function ensureSchema() {
     )`)
       .then(() => q('create index if not exists inquiries_status_idx on inquiries (status, created_at desc)'))
       .then(() => q('alter table inquiries add column if not exists notified_at timestamptz'))
+      .then(() => q('alter table inquiries add column if not exists auto_sent boolean not null default false'))
+      .then(() => q("create table if not exists agent_settings (key text primary key, value jsonb not null default '{}'::jsonb, updated_at timestamptz not null default now())"))
       .then(() => q('create table if not exists webhook_debug (id serial primary key, created_at timestamptz not null default now(), note text, keys text, body text)'))
       .catch((e) => {
         schemaReady = null;
@@ -121,7 +125,8 @@ export async function execute(name, input) {
     const id = priceIds()[p.key];
     if (!id) return { ok: false, note: 'No price source for this villa yet. The team confirms the price.' };
     const { currency, rows } = await pricelabsRows(id, ci, co);
-    return priceSummary(rows, ci, co, currency);
+    // Fees of the fact sheet (for example a cleaning fee) are added once an amount is stored there.
+    return withFees(priceSummary(rows, ci, co, currency), factsFor(p.key)?.fees);
   }
   throw new Error(`Unknown tool ${name}`);
 }
@@ -179,11 +184,17 @@ export async function processInquiry(id) {
     }
     const history = lastIn && lastIn.body === guestText ? thread.filter((m) => m !== lastIn) : thread;
     const result = await runAgent({ system: systemPrompt(today()), userText: transcript(history, guestText), tools: TOOLS, callModel, execute });
+    const needsHuman = result.needs_human || !result.reply;
     await q(
       `update inquiries set conversation_id = $2, guest_message = $3, thread = $4, draft = $5, needs_human = $6, reason = $7, intent = $8, language = $9, trace = $10, status = 'draft_ready', error = null, updated_at = now() where id = $1`,
-      [id, conversationId, guestText, JSON.stringify(thread.slice(-12)), result.reply, result.needs_human || !result.reply, result.reason, result.intent, result.language, JSON.stringify(result.trace)]
+      [id, conversationId, guestText, JSON.stringify(thread.slice(-12)), result.reply, needsHuman, result.reason, result.intent, result.language, JSON.stringify(result.trace)]
     );
-    if (agentConfig().auto_send && !result.needs_human && result.reply) await sendRow(id);
+    // Answer mode set in the SM Manager: always approve, always automatic, or automatic inside a time window.
+    // A reply that needs a person is never sent by itself.
+    if (mayAutoSend(await loadSettings(q), { reply: result.reply, needs_human: needsHuman })) {
+      await sendRow(id);
+      await q('update inquiries set auto_sent = true where id = $1', [id]);
+    }
     await notifyIfNeeded(id);
   } catch (e) {
     console.error('inquiry failed', id, e.message);
@@ -225,6 +236,20 @@ export function agentPublic(app) {
 export function agentPrivate(app, needDb, ah) {
   app.get('/agent/status', ah(async (_req, res) => res.json({ ...agentConfig(), notify_configured: notifyConfigured() })));
 
+  // How Lea answers (always approve, always automatic, time window), set in the SM Manager.
+  app.get('/agent/settings', needDb, ah(async (_req, res) => {
+    await ensureSchema();
+    res.json(settingsView(await loadSettings(q)));
+  }));
+  app.put('/agent/settings', needDb, ah(async (req, res) => {
+    await ensureSchema();
+    try {
+      res.json(settingsView(await saveSettings(q, req.body || {})));
+    } catch (e) {
+      throw new HttpError(400, String(e.message || e));
+    }
+  }));
+
   // Sends a sample notification to the configured address(es), to check the mail path.
   app.get('/agent/notify-test', ah(async (_req, res) => {
     const mail = buildMail({ contact_name: 'Test', created_at: new Date(), status: 'draft_ready', guest_message: 'Das ist eine Test-Nachricht.', reason: 'Testmail der Engine', draft: 'Hi, hier ist Lea. Das ist ein Testentwurf.' });
@@ -235,8 +260,8 @@ export function agentPrivate(app, needDb, ah) {
     await ensureSchema();
     const limit = Math.min(Number(req.query.limit) || 50, 200);
     const rows = req.query.status
-      ? await q('select id, created_at, updated_at, contact_name, guest_message, draft, needs_human, reason, intent, language, status, error from inquiries where status = $1 order by id desc limit $2', [req.query.status, limit])
-      : await q('select id, created_at, updated_at, contact_name, guest_message, draft, needs_human, reason, intent, language, status, error from inquiries order by id desc limit $1', [limit]);
+      ? await q('select id, created_at, updated_at, contact_name, guest_message, draft, needs_human, reason, intent, language, status, error, auto_sent from inquiries where status = $1 order by id desc limit $2', [req.query.status, limit])
+      : await q('select id, created_at, updated_at, contact_name, guest_message, draft, needs_human, reason, intent, language, status, error, auto_sent from inquiries order by id desc limit $1', [limit]);
     res.json({ inquiries: rows });
   }));
 
