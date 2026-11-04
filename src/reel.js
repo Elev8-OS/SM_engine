@@ -3,6 +3,7 @@ import path from 'node:path';
 import sharp from 'sharp';
 import { run, loadImage, assertVideoUrl, HttpError } from './util.js';
 import { reelOverlay, endCard } from './text.js';
+import { pickLibraryTrack } from './music.js';
 
 const W = 1080;
 const H = 1920;
@@ -127,7 +128,23 @@ export async function renderReel(job, dir) {
   // crossfade chain
   const args = ['-y'];
   for (const c of clips) args.push('-i', c.file);
-  const music = await pickMusic(job.music);
+  // Music: a track named in the job comes from assets/music (as before). Otherwise a licensed track of the library
+  // that fits the mood of the post. Without any of them the reel stays silent.
+  let music = null;
+  let musicTitle = null;
+  let musicId = null;
+  if (job.music) {
+    music = await pickMusic(job.music);
+  } else {
+    const lib = await pickLibraryTrack({ dir, mood: job.mood });
+    if (lib) {
+      music = lib.file;
+      musicTitle = lib.title;
+      musicId = lib.id;
+    } else {
+      music = await pickMusic();
+    }
+  }
   const total = clips.reduce((s, c) => s + c.dur, 0);
   if (music) args.push('-stream_loop', '-1', '-i', music);
   let graph = '';
@@ -143,11 +160,12 @@ export async function renderReel(job, dir) {
   const out = path.join(dir, 'reel.mp4');
   args.push('-filter_complex', graph, '-map', `[${prev}]`);
   if (music) {
-    args.push('-map', `${clips.length}:a`, '-af', `afade=t=in:d=0.5,afade=t=out:st=${Math.max(0, total - 1.5).toFixed(2)}:d=1.5`, '-c:a', 'aac', '-b:a', '160k');
+    // loudnorm evens out tracks of different loudness (about -16 LUFS, a normal level for social video)
+    args.push('-map', `${clips.length}:a`, '-af', `loudnorm=I=-16:TP=-1.5:LRA=11,afade=t=in:d=0.5,afade=t=out:st=${Math.max(0, total - 1.5).toFixed(2)}:d=1.5`, '-c:a', 'aac', '-b:a', '160k');
   } else {
     args.push('-an');
   }
   args.push('-t', total.toFixed(3), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', out);
   await run('ffmpeg', args);
-  return { file: out, durationSeconds: Number(total.toFixed(1)), music: music ? path.basename(music, '.mp3') : null };
+  return { file: out, durationSeconds: Number(total.toFixed(1)), music: music ? musicTitle || path.basename(music, '.mp3') : null, musicId };
 }

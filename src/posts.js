@@ -11,6 +11,7 @@ import { createDrafts, scheduleDrafts, ghlConfigured } from './ghl.js';
 import { checkFacts, factNumbers } from './facts.js';
 import { checkArea } from './area.js';
 import { checkPromoCopy } from './promo-rules.js';
+import { moodFor } from './music-rules.js';
 
 const SITE = 'elevate-villas.com'; // shown as plain text, never as a button
 const BANNED = ['leverage', 'synergy', 'synergies', 'ecosystem', 'world-class', 'best-in-class', 'innovative solution', 'unlock', 'seamless', 'actualize'];
@@ -97,17 +98,20 @@ export async function renderPost(id, rawBody) {
   try {
     const keys = [];
     let mediaType;
+    let musicInfo = null;
     if (post.format === 'reel') {
       const job = {
         hook: copy.hook || copy.lines[0]?.headline || 'Villa in Bali',
         subhook: copy.subhook,
         photos: ordered.map((p, i) => ({ url: p.url, base64: p.base64, video: p.video, line: copy.lines[i]?.headline, sub: copy.lines[i]?.sub })),
         endCard: { title: end.title || 'Book direct. Best rate guaranteed.', subtitle: end.subtitle, cta: SITE, hint: 'Link in bio' },
-        music: body.music
+        music: body.music,
+        mood: moodFor(post.pillar) // the music library picks a licensed track that fits
       };
       const r = await renderReel(job, dir);
       keys.push(await putFile(r.file, `posts/${id}/reel.mp4`, 'video/mp4'));
       mediaType = 'video';
+      musicInfo = r.music ? { id: r.musicId ?? null, title: r.music } : null;
     } else {
       const slides = ordered.map((p, i) => ({ photo: p, headline: copy.lines[i]?.headline || copy.hook || 'The R Villas Bali', sub: copy.lines[i]?.sub }));
       if (post.format === 'carousel') {
@@ -118,8 +122,8 @@ export async function renderPost(id, rawBody) {
       mediaType = 'image';
     }
     const warnings = checkCopy(copy, post.plan);
-    await q("update posts set copy = $2, media = $3, status = 'rendered', error = $4, updated_at = now() where id = $1", [id, { ...copy, warnings }, { type: mediaType, keys }, warnings.length ? warnings.join('; ') : null]);
-    return { postId: id, status: 'rendered', media: { type: mediaType, keys }, warnings };
+    await q("update posts set copy = $2, media = $3, status = 'rendered', error = $4, updated_at = now() where id = $1", [id, { ...copy, warnings }, { type: mediaType, keys, music: musicInfo }, warnings.length ? warnings.join('; ') : null]);
+    return { postId: id, status: 'rendered', media: { type: mediaType, keys, music: musicInfo }, warnings };
   } catch (e) {
     await q("update posts set status = 'failed', error = $2, updated_at = now() where id = $1", [id, String(e.message || e).slice(0, 500)]);
     throw e;

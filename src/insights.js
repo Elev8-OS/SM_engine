@@ -1,6 +1,8 @@
 import { q, dbEnabled } from './db.js';
 import { audienceRoutes } from './audience.js';
 import { maybeAnalyse, learningRoutes } from './learnings.js';
+import { classifyNew, classifyRoutes } from './classify.js';
+import { musicRoutes } from './music.js';
 
 // Per-post Instagram numbers from the Meta Graph API (Instagram API with Facebook Login).
 // Needs META_ACCESS_TOKEN and META_IG_USER_ID.
@@ -154,6 +156,8 @@ function startSync() {
     .then(async () => {
       lastError = null;
       lastSyncAt = Date.now();
+      // Instagram posts that did not come out of the engine get their villa and category automatically
+      await classifyNew().catch((e) => console.error('Post classification failed:', e.message));
       await maybeAnalyse().catch((e) => console.error('Learnings analysis failed:', e.message));
     })
     .catch((e) => {
@@ -178,6 +182,11 @@ export function ensureInsightsTable() {
     )`);
     await q('alter table post_insights add column if not exists profile_visits int');
     await q('alter table post_insights add column if not exists follows int');
+    // Automatic assignment of posts that have no match in the engine (see classify.js)
+    await q('alter table post_insights add column if not exists villa_key text');
+    await q('alter table post_insights add column if not exists pillar text');
+    await q('alter table post_insights add column if not exists classified_at timestamptz');
+    await q('alter table post_insights add column if not exists classified_by text');
     await q(`create table if not exists post_insight_snapshots (
       media_id text not null references post_insights(media_id) on delete cascade,
       bucket_days int not null,
@@ -207,8 +216,9 @@ export async function postInsights({ refresh = false, days = 90, limit = 100 } =
 
   const d = Number(days) > 0 ? Number(days) : null;
   const lim = Math.min(300, Math.max(1, Number(limit) || 100));
+  // Villa and category: from our own post when there is a match, otherwise the automatic assignment
   const rows = await q(
-    `select i.*, p.format, p.pillar, p.property_key, p.plan_date,
+    `select i.*, p.format, coalesce(p.pillar, i.pillar) as pillar_final, coalesce(p.property_key, i.villa_key) as villa_final, p.plan_date,
             (select count(*)::int from clicks c where c.post_id = i.post_id and not c.is_bot) as clicks
        from post_insights i left join posts p on p.id = i.post_id
       where ($1::int is null or i.posted_at >= now() - ($1::int * interval '1 day'))
@@ -246,8 +256,8 @@ export async function postInsights({ refresh = false, days = 90, limit = 100 } =
         thumbnail: r.thumbnail,
         postId: r.post_id,
         format: r.format,
-        pillar: r.pillar,
-        villa: r.property_key,
+        pillar: r.pillar_final,
+        villa: r.villa_final,
         clicks: r.clicks ?? 0
       };
     })
@@ -280,6 +290,7 @@ function startScheduler() {
 }
 
 // Analytics routes: per-post Instagram numbers, Meta account helper, the audience planner and learnings.
+// The routes of the post classification and of the music library are registered here as well.
 export function insightsRoutes(app, needDb, ah) {
   startScheduler();
   app.get('/stats/posts', needDb, ah(async (req, res) => {
@@ -289,5 +300,7 @@ export function insightsRoutes(app, needDb, ah) {
   }));
   audienceRoutes(app, needDb, ah);
   learningRoutes(app, needDb, ah);
+  classifyRoutes(app, needDb, ah);
+  musicRoutes(app, needDb, ah);
   app.get('/stats/meta/accounts', ah(async (_req, res) => res.json(await metaAccounts())));
 }
