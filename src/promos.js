@@ -2,6 +2,7 @@ import { q } from './db.js';
 import { HttpError } from './util.js';
 import { factsFor } from './facts.js';
 import { cleanPromo, problem, isLive, matchGaps, suggest } from './promo-rules.js';
+import { competitorRoutes } from './competitors.js';
 
 // Promotions ("Aktionen"): codes created by hand in Elev8. The team enters the code and its terms in the SM Manager,
 // the post generator and Lea use only what is active here. Writing codes into Elev8 by API comes later.
@@ -130,4 +131,7 @@ export function promoRoutes(app, needDb, ah) {
     await q('delete from promos where id = $1', [Number(req.params.id)]);
     res.json({ id: Number(req.params.id), deleted: true });
   }));
+
+  // Benchmark of other providers' Instagram accounts
+  competitorRoutes(app, needDb, ah);
 }
