@@ -5,6 +5,8 @@ import { AREAS } from './seed.js';
 import { activeGuidance } from './learnings.js';
 import { promptBlock, withFacts } from './facts.js';
 import { areaPromptBlock } from './area.js';
+import { livePromosFor } from './promos.js';
+import { promoPromptBlock, promoView } from './promo-rules.js';
 
 const HERO_ROOMS = ['pool', 'exterior', 'view', 'terrace'];
 const DETAIL_ROOMS = ['detail', 'bathroom', 'kitchen', 'living', 'bedroom', 'pool'];
@@ -121,6 +123,8 @@ export async function planNext(date, { propertyKey } = {}) {
 
   const areas = [...new Set(picked.props.map((p) => p.area))];
   const guidance = await activeGuidance(); // rules the team approved in Orbit (Learnings)
+  // Promotions the team set live in the SM Manager for these villas on the post day. Only these may be mentioned.
+  const promotions = (await livePromosFor(picked.props.map((p) => p.key), planDate)).map(promoView);
   const plan = {
     planDate,
     format: slot.format,
@@ -129,6 +133,7 @@ export async function planNext(date, { propertyKey } = {}) {
     properties: picked.props.map(factsOf),
     photos: picked.photos.map(photoOut),
     areaFacts: pillar === 'neighbourhood' ? Object.fromEntries(areas.map((a) => [a, AREAS[a] || []])) : undefined,
+    promotions: promotions.length ? promotions : undefined,
     rules: [...RULES, ...guidance.rules],
     learningIds: guidance.ids.length ? guidance.ids : undefined,
     copySchema: COPY_SCHEMA
@@ -155,6 +160,8 @@ function buildPrompt(plan) {
     ...promptBlock(plan.properties),
     // Real places around the villa. Neighbourhood posts get the full list, the others only the closest few.
     ...(plan.pillar === 'design_details' ? [] : areaPromptBlock(plan.properties, { all: plan.pillar === 'neighbourhood' })),
+    // The offer: exactly the promotion that is active, or none at all.
+    ...promoPromptBlock(plan.promotions),
     '', `PHOTOS in order (${plan.photos.length}):`, photoLines,
     '', 'RULES:', ...plan.rules.map((r) => `- ${r}`),
     '', 'Reply with one JSON object only, no markdown and no text around it, with these keys:',

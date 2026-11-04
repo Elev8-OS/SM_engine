@@ -6,8 +6,8 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "test": "node test/unit.js && node test/read.js && node test/settings.js && node test/currency.js && node test/smoke.js",
-    "test:unit": "node test/unit.js && node test/read.js && node test/settings.js && node test/currency.js"
+    "test": "node test/unit.js && node test/read.js && node test/settings.js && node test/currency.js && node test/promos.js && node test/smoke.js",
+    "test:unit": "node test/unit.js && node test/read.js && node test/settings.js && node test/currency.js && node test/promos.js"
   },
   "engines": {
     "node": ">=20"

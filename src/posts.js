@@ -10,6 +10,7 @@ import { mediaUrl } from './media.js';
 import { createDrafts, scheduleDrafts, ghlConfigured } from './ghl.js';
 import { checkFacts, factNumbers } from './facts.js';
 import { checkArea } from './area.js';
+import { checkPromoCopy } from './promo-rules.js';
 
 const SITE = 'elevate-villas.com'; // shown as plain text, never as a button
 const BANNED = ['leverage', 'synergy', 'synergies', 'ecosystem', 'world-class', 'best-in-class', 'innovative solution', 'unlock', 'seamless', 'actualize'];
@@ -32,6 +33,7 @@ export function checkCopy(copy, plan) {
   }
   warnings.push(...checkFacts(copy, plan));
   warnings.push(...checkArea(copy, plan)); // places, walking times, prices and ratings of places
+  warnings.push(...checkPromoCopy(copy, plan)); // offers and codes: only the active promotion may appear
   if (!copy.captions?.instagram) warnings.push('Missing Instagram caption');
   if (!Array.isArray(copy.hashtags) || copy.hashtags.length < 3) warnings.push('Too few hashtags');
   return warnings;

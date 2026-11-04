@@ -6,6 +6,7 @@ import { runAgent } from './run.js';
 import { TOOLS, systemPrompt, availabilityFrom, priceSummary, isDate, nightsBetween } from './tools.js';
 import { villaView, linkResult, withFees } from './villas.js';
 import { convert } from './currency.js';
+import { livePromos, promoRoutes } from '../promos.js';
 import { readGuest, whyEmpty } from './read.js';
 import { loadSettings, saveSettings, settingsView, mayAutoSend } from './settings.js';
 import { notifyConfigured, buildMail, sendMail } from './notify.js';
@@ -104,13 +105,15 @@ function checkDates(input) {
 export async function execute(name, input) {
   if (name === 'list_villas') {
     const rows = await q('select key, name, area, type, guests, size_m2, bedrooms, url, highlights, open_questions from properties order by key');
-    return rows.map((p) => villaView(p, MULTI_UNIT.has(p.key)));
+    // Promotions the team set live in the SM Manager: Lea sees them per villa and may offer only these.
+    const promos = await livePromos();
+    return rows.map((p) => villaView(p, MULTI_UNIT.has(p.key), promos.filter((x) => x.property_key === 'all' || x.property_key === p.key)));
   }
   if (name === 'convert_currency') return convert(input);
   if (name === 'build_booking_link') {
     const p = await villa(input.villa);
     checkDates(input);
-    return linkResult(p, input, { multiUnit: MULTI_UNIT.has(p.key) });
+    return linkResult(p, input, { multiUnit: MULTI_UNIT.has(p.key), promos: input.promo_code ? await livePromos() : [] });
   }
   if (name === 'check_availability' || name === 'get_prices') {
     const p = await villa(input.villa);
@@ -310,4 +313,7 @@ export function agentPrivate(app, needDb, ah) {
     const result = await runAgent({ system: systemPrompt(today()), userText: transcript([], message), tools: TOOLS, callModel, execute });
     res.json(result);
   }));
+
+  // Promotions ("Aktionen") the team enters in the SM Manager
+  promoRoutes(app, needDb, ah);
 }
