@@ -1,5 +1,6 @@
 import { factsFor } from '../facts.js';
 import { bookingLink, DM_UTM } from './tools.js';
+import { appliesTo, normaliseCode, promoView } from '../promo-rules.js';
 
 const withUtm = (url) => (url ? `${url}${url.includes('?') ? '&' : '?'}utm_source=${DM_UTM.utm_source}&utm_medium=${DM_UTM.utm_medium}&utm_campaign=${DM_UTM.utm_campaign}` : null);
 const USABLE = new Set(['confirmed', 'elev8']);
@@ -8,7 +9,7 @@ const USABLE = new Set(['confirmed', 'elev8']);
 export const maxGuests = (p) => factsFor(p.key)?.guestsMax ?? p.guests ?? null;
 
 /** One property as the agent sees it. A fact sheet, when there is one, replaces the table values it covers. */
-export function villaView(p, multiUnit = false) {
+export function villaView(p, multiUnit = false, promos = []) {
   const f = factsFor(p.key);
   return {
     key: p.key,
@@ -25,21 +26,32 @@ export function villaView(p, multiUnit = false) {
     verified_facts: f ? f.facts.filter((x) => USABLE.has(x.status)).map((x) => x.text) : undefined,
     not_available: f?.absent?.length ? f.absent.map((a) => a.text) : undefined,
     uncertain_facts: f ? (f.open?.length ? f.open : undefined) : p.open_questions || undefined,
+    active_promotions: promos.length ? promos.map(promoView) : undefined,
     booking_link: withUtm(p.url),
     note: multiUnit ? 'Several units. The team confirms availability and prices.' : undefined
   };
 }
 
 /** Result of the build_booking_link tool. Never throws: a problem is returned as a note the model can act on. */
-export function linkResult(p, input, { multiUnit = false } = {}) {
+export function linkResult(p, input, { multiUnit = false, promos = [] } = {}) {
   const adults = Number(input.adults);
   const children = Number(input.children ?? 0);
   const max = maxGuests(p);
   if (Number.isInteger(adults) && Number.isInteger(children) && max && adults + children > max) {
     return { ok: false, note: `${p.name} sleeps up to ${max} guests and this group is ${adults + children}. Do not send a link for it. Suggest a villa that fits the group or hand over to the team.` };
   }
+  // A code only goes into the link when it is an active promotion that fits this villa and these dates.
+  let promo;
+  if (input.promo_code) {
+    const code = normaliseCode(input.promo_code);
+    const mine = promos.filter((x) => x.code === code);
+    if (!mine.length) return { ok: false, note: `The code ${code} is not an active promotion. Do not offer it.` };
+    const fits = mine.map((x) => appliesTo(x, p.key, input.check_in, input.check_out));
+    if (!fits.some((f) => f.ok)) return { ok: false, note: `${fits[0].why} Do not offer it for this stay.` };
+    promo = code;
+  }
   try {
-    const url = bookingLink(p.url, { checkIn: input.check_in, checkOut: input.check_out, adults, children, currency: input.currency }, DM_UTM);
+    const url = bookingLink(p.url, { checkIn: input.check_in, checkOut: input.check_out, adults, children, currency: input.currency, promo }, DM_UTM);
     return {
       ok: true,
       villa: p.name,
@@ -48,6 +60,7 @@ export function linkResult(p, input, { multiUnit = false } = {}) {
       adults,
       children,
       currency: input.currency ? String(input.currency).toUpperCase() : undefined,
+      promo_code: promo,
       booking_link: url,
       note: multiUnit ? 'Several units. Say the team confirms which unit is free.' : 'Share this link exactly as it is.'
     };

@@ -54,10 +54,12 @@ export function priceSummary(rows, checkIn, checkOut, currency) {
 export const BOOKING_PARAMS = { checkIn: 'check_in_date', checkOut: 'check_out_date', adults: 'number_of_adult', children: 'number_of_children' };
 // Currency the booking page should open in. Only sent when the guest asked for one (the page default is CHF).
 export const CURRENCY_PARAM = 'currency';
+// Promo code the booking page should prefill. Only a code that is active for this villa and fits the stay.
+export const PROMO_PARAM = 'promo_code';
 export const DM_UTM = { utm_source: 'instagram', utm_medium: 'dm', utm_campaign: 'agent' };
 
 /** Booking page link of a villa with the stay already filled in. Throws a readable error on bad input. */
-export function bookingLink(baseUrl, { checkIn, checkOut, adults, children = 0, currency } = {}, extra = {}) {
+export function bookingLink(baseUrl, { checkIn, checkOut, adults, children = 0, currency, promo } = {}, extra = {}) {
   if (!baseUrl) throw new Error('This villa has no booking page yet. The team shares the link.');
   if (!isDate(checkIn) || !isDate(checkOut)) throw new Error('check_in and check_out must be YYYY-MM-DD');
   if (checkOut <= checkIn) throw new Error('check_out must be after check_in');
@@ -67,12 +69,15 @@ export function bookingLink(baseUrl, { checkIn, checkOut, adults, children = 0, 
   if (!Number.isInteger(c) || c < 0 || c > 20) throw new Error('children must be a whole number, 0 or more');
   const cur = currency ? String(currency).toUpperCase() : '';
   if (cur && !/^[A-Z]{3}$/.test(cur)) throw new Error('currency must be a 3-letter code, for example IDR');
+  const code = promo ? String(promo).replace(/\s+/g, '').toUpperCase() : '';
+  if (code && !/^[A-Z0-9][A-Z0-9_-]{2,23}$/.test(code)) throw new Error('promo_code is not a valid code');
   const u = new URL(baseUrl);
   u.searchParams.set(BOOKING_PARAMS.checkIn, checkIn);
   u.searchParams.set(BOOKING_PARAMS.checkOut, checkOut);
   u.searchParams.set(BOOKING_PARAMS.adults, String(a));
   u.searchParams.set(BOOKING_PARAMS.children, String(c));
   if (cur) u.searchParams.set(CURRENCY_PARAM, cur);
+  if (code) u.searchParams.set(PROMO_PARAM, code);
   for (const [k, v] of Object.entries(extra)) u.searchParams.set(k, v);
   return u.toString();
 }
@@ -80,7 +85,7 @@ export function bookingLink(baseUrl, { checkIn, checkOut, adults, children = 0, 
 export const TOOLS = [
   {
     name: 'list_villas',
-    description: 'List The R Villas Bali properties with their facts (key, name, area, guests, bedrooms, size, highlights, booking link). Fields in uncertain_facts must not be stated as fact.',
+    description: 'List The R Villas Bali properties with their facts (key, name, area, guests, bedrooms, size, highlights, booking link, active_promotions). Fields in uncertain_facts must not be stated as fact.',
     input_schema: { type: 'object', properties: {}, additionalProperties: false }
   },
   {
@@ -114,7 +119,8 @@ export const TOOLS = [
         check_out: { type: 'string', description: 'YYYY-MM-DD, the departure day' },
         adults: { type: 'integer', description: 'Number of adults (13 and older), at least 1' },
         children: { type: 'integer', description: 'Number of children (2 to 12). 0 only if the guest said so or the group is clearly adults only.' },
-        currency: { type: 'string', description: 'Only when the guest asked for prices in a currency other than CHF: its 3-letter code, for example IDR, EUR or USD. The booking page then opens in that currency. Leave it out otherwise.' }
+        currency: { type: 'string', description: 'Only when the guest asked for prices in a currency other than CHF: its 3-letter code, for example IDR, EUR or USD. The booking page then opens in that currency. Leave it out otherwise.' },
+        promo_code: { type: 'string', description: 'Only a code from active_promotions of this villa whose terms fit this stay and that you offered or the guest asked about. It is checked and goes into the link. Leave it out otherwise.' }
       },
       required: ['villa', 'check_in', 'check_out', 'adults', 'children'],
       additionalProperties: false
@@ -166,6 +172,7 @@ export function systemPrompt(today) {
     '- If dates, number of guests or both are missing, ask for them in one short question instead of guessing. Ask for adults and children together ("how many adults and how many children?"). You may suggest villas that fit the guest count.',
     '- A group larger than the villa sleeps (guests in list_villas) does not fit: say so and suggest a villa that does, or hand over to the team.',
     '- To book, share a booking link. Once the villa, check-in, check-out, the number of adults and the number of children are all known from the guest, call build_booking_link and share exactly the link it returns, because it opens the booking page with the stay already filled in. If the guest asked for a currency other than CHF, pass it as currency (3-letter code, for example IDR) so the page opens in that currency. Otherwise share the booking_link from list_villas. Never guess a date or a number for the link; if only the number of children is unclear, ask. Check availability first and do not send a link for dates that are not available: offer other dates or another villa.',
+    '- Promotions: a villa may list active_promotions (code, terms, stay window, minimum nights, last booking day). You may offer one when the stay fits its terms and it helps the guest decide: at most once per conversation, in the words of the terms. Never invent, extend or combine offers and never promise a discount. If the guest asks for a discount and no active promotion fits, hand over to the team. When you share a promotion, call build_booking_link with its promo_code.',
     '- Do not promise a booking, do not take payment details, do not hold dates.',
     '- Never give access codes, WiFi details or exact addresses.',
     '',
