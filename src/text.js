@@ -3,6 +3,10 @@ import sharp from 'sharp';
 export const BRAND = { yellow: '#F6BB12', black: '#0B0B0B', white: '#FFFFFF' };
 const FONT = "Inter, 'DejaVu Sans', sans-serif";
 
+// Text sits directly on the photo, with no dark bar or box behind it. A soft shadow around the letters keeps white text
+// readable on bright photos. It is a blurred, slightly shifted copy of the letters themselves, not a surface.
+const SHADOW_DEFS = '<defs><filter id="sh" x="-10%" y="-10%" width="120%" height="140%"><feGaussianBlur in="SourceAlpha" stdDeviation="7"/><feOffset dy="3"/><feComponentTransfer><feFuncA type="linear" slope="0.6"/></feComponentTransfer><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>';
+
 export function esc(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
@@ -31,7 +35,7 @@ function textBlock({ lines, fontSize, x, y, weight = 600, fill = BRAND.white, an
 }
 
 /**
- * Transparent text overlay for a reel clip. Text sits inside the Instagram safe zone
+ * Transparent text overlay for a reel clip: only the text, no bar behind it. Text sits inside the Instagram safe zone
  * (see the comment below for the areas kept free).
  */
 export async function reelOverlay({ width, height, headline, sub, big = false }) {
@@ -49,14 +53,13 @@ export async function reelOverlay({ width, height, headline, sub, big = false })
   const bandBottom = bottomLimit;
   const bandTop = bandBottom - blockH - padY * 2;
   let y = bandTop + padY + fs * 0.9;
-  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">`;
-  svg += `<rect x="0" y="${Math.round(bandTop)}" width="${width}" height="${Math.round(bandBottom - bandTop)}" fill="rgba(0,0,0,0.5)"/>`;
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">${SHADOW_DEFS}<g filter="url(#sh)">`;
   svg += textBlock({ lines, fontSize: fs, x: cx, y });
   if (subLines.length) {
     y += (lines.length - 1) * fs * 1.18 + fs * 0.35 + subFs * 1.2;
     svg += textBlock({ lines: subLines, fontSize: subFs, x: cx, y, weight: 400, lineHeight: 1.3 });
   }
-  svg += '</svg>';
+  svg += '</g></svg>';
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
 
@@ -82,7 +85,7 @@ export async function endCard({ width, height, title, subtitle, cta, hint }) {
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
 
-/** Flat text band for a 4:5 carousel slide, drawn at the bottom. */
+/** Text for a 4:5 carousel slide, drawn at the bottom. Only the text, no bar behind it. */
 export async function slideOverlay({ width, height, headline, sub, cta, darken, bottomInset = 0 }) {
   const fs = 64;
   const subFs = 34;
@@ -93,9 +96,9 @@ export async function slideOverlay({ width, height, headline, sub, cta, darken, 
   const bandH = Math.round(blockH + padB + 56);
   const bandTop = height - bandH - bottomInset;
   let y = bandTop + 56 + fs * 0.9;
-  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">`;
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">${SHADOW_DEFS}`;
   if (darken) svg += `<rect width="${width}" height="${height}" fill="rgba(0,0,0,0.45)"/>`;
-  svg += `<rect x="0" y="${bandTop}" width="${width}" height="${bandH}" fill="rgba(0,0,0,${darken ? 0 : 0.5})"/>`;
+  svg += '<g filter="url(#sh)">';
   svg += textBlock({ lines, fontSize: fs, x: 60, y, anchor: 'start' });
   y += (lines.length - 1) * fs * 1.18 + fs * 0.3;
   if (subLines.length) {
@@ -106,6 +109,6 @@ export async function slideOverlay({ width, height, headline, sub, cta, darken, 
   if (cta) {
     svg += `<text x="60" y="${Math.round(y + 80)}" font-family="${FONT}" font-size="46" font-weight="700" fill="${BRAND.yellow}" text-anchor="start">${esc(cta)}</text>`;
   }
-  svg += '</svg>';
+  svg += '</g></svg>';
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
