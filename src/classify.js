@@ -1,5 +1,6 @@
 import { q } from './db.js';
 import { HttpError } from './util.js';
+import { compareRoutes } from './compare-sources.js';
 
 // Automatic villa and category for Instagram posts that did not come out of the engine (older or manual posts).
 // Villa: found by name in the caption and hashtags. Category: a small model call, with simple rules as the fallback.
@@ -90,6 +91,7 @@ export async function classifyNew({ limit = 40, fetchFn = fetch } = {}) {
 }
 
 export function classifyRoutes(app, needDb, ah) {
+  compareRoutes(app, needDb, ah); // automatic against by hand (compare-sources.js), registered here with the post assignment it builds on
   // Classify what is still open, now
   app.post('/stats/posts/classify', needDb, ah(async (_req, res) => res.json({ classified: await classifyNew({ limit: 100 }) })));
   // Correct one post by hand. A manual choice is never overwritten.
