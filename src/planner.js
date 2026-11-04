@@ -7,6 +7,7 @@ import { promptBlock, withFacts } from './facts.js';
 import { areaPromptBlock } from './area.js';
 import { livePromosFor } from './promos.js';
 import { promoPromptBlock, promoView } from './promo-rules.js';
+import { recentFeedback, feedbackPromptBlock } from './drafting.js';
 
 const HERO_ROOMS = ['pool', 'exterior', 'view', 'terrace'];
 const DETAIL_ROOMS = ['detail', 'bathroom', 'kitchen', 'living', 'bedroom', 'pool'];
@@ -123,6 +124,8 @@ export async function planNext(date, { propertyKey } = {}) {
 
   const areas = [...new Set(picked.props.map((p) => p.area))];
   const guidance = await activeGuidance(); // rules the team approved in Orbit (Learnings)
+  // Why the team rejected earlier posts: it flows into the brief so the same mistake is not made again
+  const feedback = await recentFeedback();
   // Promotions the team set live in the SM Manager for these villas on the post day. Only these may be mentioned.
   const promotions = (await livePromosFor(picked.props.map((p) => p.key), planDate)).map(promoView);
   const plan = {
@@ -134,6 +137,7 @@ export async function planNext(date, { propertyKey } = {}) {
     photos: picked.photos.map(photoOut),
     areaFacts: pillar === 'neighbourhood' ? Object.fromEntries(areas.map((a) => [a, AREAS[a] || []])) : undefined,
     promotions: promotions.length ? promotions : undefined,
+    feedback: feedback.length ? feedback : undefined,
     rules: [...RULES, ...guidance.rules],
     learningIds: guidance.ids.length ? guidance.ids : undefined,
     copySchema: COPY_SCHEMA
@@ -162,6 +166,8 @@ function buildPrompt(plan) {
     ...(plan.pillar === 'design_details' ? [] : areaPromptBlock(plan.properties, { all: plan.pillar === 'neighbourhood' })),
     // The offer: exactly the promotion that is active, or none at all.
     ...promoPromptBlock(plan.promotions),
+    // What the team said when it rejected earlier posts
+    ...feedbackPromptBlock(plan.feedback),
     '', `PHOTOS in order (${plan.photos.length}):`, photoLines,
     '', 'RULES:', ...plan.rules.map((r) => `- ${r}`),
     '', 'Reply with one JSON object only, no markdown and no text around it, with these keys:',

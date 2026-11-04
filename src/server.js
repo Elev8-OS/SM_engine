@@ -11,6 +11,7 @@ import { verifyMedia } from './media.js';
 import { dbEnabled, migrate, q } from './db.js';
 import { seedProperties } from './seed.js';
 import { planNext } from './planner.js';
+import { resolveAutoRun, noteRun, draftingRoutes } from './drafting.js';
 import { renderPost, listPosts, postView, draftToGhl, setStatus } from './posts.js';
 import { ghlConfigured, listAccounts, listUsers, getStatistics } from './ghl.js';
 import { goHandler, clickStats } from './links.js';
@@ -127,12 +128,24 @@ const ah = (fn) => (req, res, next) => fn(req, res).catch(next);
 
 // Plan the post for a day (default: today in Bali). Safe to call twice, it returns the same plan.
 // Optional propertyKey plans it for that villa instead of the next one in the rotation.
+// A call with neither date nor propertyKey is the scheduled run: it only does something when automatic drafting is switched
+// on (see drafting.js), for the day lead days ahead, and it skips a day that already has a post. Otherwise it answers { skipped: true }.
 app.post('/plan/next', needDb, ah(async (req, res) => {
-  const base = req.body?.date ? new Date(`${req.body.date}T00:00:00Z`) : new Date(Date.now() + 8 * 3600 * 1000);
-  if (Number.isNaN(base.getTime())) throw new HttpError(400, 'date must be YYYY-MM-DD');
-  const day = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate()));
+  const explicit = Boolean(req.body?.date || req.body?.propertyKey);
+  let day;
+  if (!explicit) {
+    const run = await resolveAutoRun();
+    if (run.skipped) return res.json(run);
+    day = run.day;
+  } else {
+    const base = req.body?.date ? new Date(`${req.body.date}T00:00:00Z`) : new Date(Date.now() + 8 * 3600 * 1000);
+    if (Number.isNaN(base.getTime())) throw new HttpError(400, 'date must be YYYY-MM-DD');
+    day = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate()));
+  }
   const propertyKey = req.body?.propertyKey ? String(req.body.propertyKey) : undefined;
-  res.json(await planNext(day, { propertyKey }));
+  const plan = await planNext(day, { propertyKey });
+  if (!explicit) await noteRun(`Planned post ${plan.postId} for ${plan.planDate}`).catch(() => {});
+  res.json(plan);
 }));
 
 app.get('/posts', needDb, ah(async (req, res) => res.json({ posts: await listPosts({ status: req.query.status, limit: Math.min(Number(req.query.limit) || 50, 200) }) })));
@@ -201,6 +214,7 @@ app.get('/stats/clicks', needDb, ah(async (req, res) => res.json(await clickStat
 
 agentPrivate(app, needDb, ah);
 insightsRoutes(app, needDb, ah);
+draftingRoutes(app, needDb, ah);
 
 app.use((err, _req, res, _next) => {
   if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
