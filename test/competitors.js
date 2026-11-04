@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { parseHandle, summarise, unreadable } from '../src/competitors.js';
+import { parseHandle, summarise, unreadable, compare } from '../src/competitors.js';
 
 let n = 0;
 const t = (name, fn) => { fn(); n++; console.log('ok', name); };
@@ -55,5 +55,43 @@ t('which errors mean "cannot be read"', () => {
   assert.equal(unreadable(new Error('Unsupported get request. The user is not a business account')), true);
   assert.equal(unreadable(Object.assign(new Error('Error validating access token'), { code: 190 })), false);
   assert.equal(unreadable(new Error('timeout')), false);
+});
+const comp = (handle, o = {}) => ({ handle, status: 'ok', followers: 10000, postsPerWeek: 3, avgLikes: 100, avgComments: 5, engagementPct: 1, reelSharePct: 40, ...o });
+t('comparison: rank, median and verdict per metric', () => {
+  const comps = [comp('a', { followers: 20000, engagementPct: 2 }), comp('b', { followers: 10000, engagementPct: 1 }), comp('c', { followers: 5000, engagementPct: 0.5 })];
+  const self = { followers: 8000, posts_per_week: 3, avg_likes: 100, avg_comments: 5, engagement_pct: 1.5, reel_share_pct: 10 };
+  const c = compare(self, comps);
+  const by = (k) => c.rows.find((r) => r.key === k);
+  assert.equal(c.readable, 3);
+  assert.equal(by('followers').median, 10000);
+  assert.equal(by('followers').rank, 3);
+  assert.equal(by('followers').of, 4);
+  assert.equal(by('followers').diffPct, -20);
+  assert.equal(by('followers').verdict, 'worse');
+  assert.equal(by('followers').bestHandle, 'a');
+  assert.equal(by('engagementPct').verdict, 'better');
+  assert.equal(by('engagementPct').rank, 2);
+  assert.equal(by('postsPerWeek').verdict, 'similar');
+  assert.equal(by('reelSharePct').verdict, 'worse');
+  assert.deepEqual(c.summary, { better: 1, worse: 2, similar: 3 });
+});
+t('comparison ignores accounts that cannot be read and copes with a missing own account', () => {
+  const comps = [comp('a'), { handle: 'b', status: 'not_readable' }, { handle: 'c', status: 'error' }];
+  const c = compare({ followers: 12000, posts_per_week: 3, avg_likes: 100, avg_comments: 5, engagement_pct: 1, reel_share_pct: 40 }, comps);
+  assert.equal(c.readable, 1);
+  assert.equal(c.rows.find((r) => r.key === 'followers').of, 2);
+  assert.equal(c.rows.find((r) => r.key === 'followers').rank, 1);
+  const none = compare(null, comps);
+  assert.equal(none.rows[0].ours, null);
+  assert.equal(none.rows[0].verdict, 'unknown');
+  assert.equal(compare({ error: 'x' }, comps).rows[0].verdict, 'unknown');
+  const empty = compare({ followers: 5 }, []);
+  assert.equal(empty.readable, 0);
+  assert.equal(empty.rows[0].verdict, 'unknown');
+});
+t('comparison: a median of zero does not divide', () => {
+  const comps = [comp('a', { avgComments: 0 }), comp('b', { avgComments: 0 })];
+  assert.equal(compare({ avg_comments: 3 }, comps).rows.find((r) => r.key === 'avgComments').verdict, 'better');
+  assert.equal(compare({ avg_comments: 0 }, comps).rows.find((r) => r.key === 'avgComments').verdict, 'similar');
 });
 console.log(`\n${n} tests passed`);
