@@ -1,0 +1,37 @@
+{
+  "key": "masurai",
+  "name": "The R Villa Masurai",
+  "updated": "2026-11-05",
+  "guestsMax": 4,
+  "bedrooms": 2,
+  "bathrooms": 2,
+  "bedroomsText": "2 bedrooms, each with a queen bed, and 2 full bathrooms",
+  "fees": [
+    { "name": "cleaning", "label": "cleaning fee", "amount": null, "currency": "CHF", "per": "stay", "source": "not stored yet; owner to confirm" }
+  ],
+  "facts": [
+    { "text": "Sleeps up to 4 guests.", "status": "elev8", "source": "Elev8 questionnaire and listing (maximum capacity 4)" },
+    { "text": "2 bedrooms, each with a queen-size bed, and 2 full bathrooms.", "status": "elev8", "source": "Elev8 questionnaire" },
+    { "text": "Single-level home.", "status": "elev8", "source": "Elev8 questionnaire" },
+    { "text": "Private pool.", "status": "confirmed", "source": "Elev8 listing title and outdoor amenities; the owner named Elev8 as the source on 2026-11-05", "tags": ["pool"] },
+    { "text": "A private home cinema.", "status": "confirmed", "source": "Elev8 listing title and amenities (movie theater); the owner named Elev8 as the source on 2026-11-05", "tags": ["cinema"] },
+    { "text": "Air conditioning, WiFi, a TV and hot water.", "status": "elev8", "source": "Elev8 questionnaire" },
+    { "text": "A fully equipped kitchen with stove, refrigerator and freezer, kettle, coffee maker, pots and pans, dishes, utensils and wine glasses, plus a dining table.", "status": "elev8", "source": "Elev8 questionnaire" },
+    { "text": "A living room, a private entrance and parking on the property.", "status": "elev8", "source": "Elev8 questionnaire" },
+    { "text": "Laundry facilities with a drying rack, an iron and ironing board, and a hair dryer.", "status": "elev8", "source": "Elev8 questionnaire" },
+    { "text": "Laptop friendly.", "status": "elev8", "source": "Elev8 questionnaire" },
+    { "text": "In a calm part of Pererenan (Jl. Belulang Yeh), within reach of cafes, restaurants and amenities in the Greater Canggu area.", "status": "elev8", "source": "Elev8 questionnaire (neighborhood)" },
+    { "text": "About 45 to 60 minutes from Ngurah Rai Airport. An airport pickup can be arranged.", "status": "elev8", "source": "Elev8 questionnaire (how to find the property)" }
+  ],
+  "absent": [
+    { "term": "pets", "text": "Pets are not allowed.", "source": "Elev8 questionnaire (property description)" }
+  ],
+  "open": [
+    "Elev8 lists 250 m² without saying whether it is plot or living area. Do not state any size.",
+    "View claims (rice fields, sunset, ocean) are not confirmed. The Elev8 description mentions rice field views. Only say it if a photo clearly shows it and the team confirms it.",
+    "Never call the villa beachfront and give no beach distance.",
+    "Hot tub, barbecue, gym, rooftop, sauna and a dedicated desk or workspace are not confirmed. Do not mention them.",
+    "Whether a crib or highchair is kept on site is unclear. Do not mention them.",
+    "A cleaning fee is not stored yet. Do not state an amount and do not say there is none: say the final price with all fees is shown on the booking page."
+  ]
+}
