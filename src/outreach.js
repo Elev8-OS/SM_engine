@@ -61,12 +61,15 @@ export function e164(raw) {
   return n >= 8 && n <= 15 ? d : null;
 }
 
+/** Category tag (venue-<category>) from the venue name. Order matters: the first match wins. */
 export function categoryOf(name) {
   const n = String(name || '').toLowerCase();
   if (/beach club|beachfront|la brisa/.test(n)) return 'beach-club';
-  if (/\bspa\b|massage|yoga|wellness|studio/.test(n)) return 'wellness';
-  if (/cafe|coffee|brunch|eatery/.test(n)) return 'cafe';
-  if (/warung|restaurant|trattoria|kitchen|bistro|\bbar\b|wine|chef/.test(n)) return 'restaurant';
+  if (/cowork|thehub|argil|tribal/.test(n)) return 'coworking';
+  if (/padel|\bgym\b|fitness|crossfit|f45|\bmma\b|muay|fight|boxing|boulder|climb|equestrian|golf|skate|amplitude|\bfit\b|body craft|the block|rite /.test(n)) return 'fitness';
+  if (/\bspa\b|massage|yoga|wellness|studio|pilates|the path/.test(n)) return 'wellness';
+  if (/cafe|coffee|brunch|eatery|bakers?\b/.test(n)) return 'cafe';
+  if (/warung|restaurant|trattoria|kitchen|bistro|\bbar\b|wine|chef|taphouse|pub\b/.test(n)) return 'restaurant';
   return '';
 }
 
