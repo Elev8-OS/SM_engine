@@ -7,6 +7,8 @@ import { HttpError } from './util.js';
 // Tags: vendor, venue-partner, venue-<category>, whatsapp-optin (only when the venue agreed to WhatsApp messages).
 // Workflow trigger: venue-outreach-send. Reminder stops when venue-photos-received is set.
 // The venue token and link are custom contact fields (created on first sync when the token may do it).
+// Landline numbers are not blocked: they can be WhatsApp numbers too. A message that was not delivered is read back
+// from the GHL conversation (deliveryStatus) so the app can mark it.
 
 const BASE = 'https://services.leadconnectorhq.com';
 export const TAGS = { send: 'venue-outreach-send', received: 'venue-photos-received', optin: 'whatsapp-optin' };
@@ -45,7 +47,7 @@ async function fieldIds({ create = false } = {}) {
   return out;
 }
 
-/** International format. Indonesian local numbers (0812 ...) become +62812 ... */
+/** International format. Indonesian local numbers (0812 ..., also landlines like 0361 ...) become +62812 ... */
 export function e164(raw) {
   let d = String(raw || '').replace(/[^\d+]/g, '');
   if (!d) return null;
@@ -58,9 +60,6 @@ export function e164(raw) {
   const n = d.length - 1;
   return n >= 8 && n <= 15 ? d : null;
 }
-
-/** Indonesian mobile numbers start +628. Landlines cannot receive WhatsApp. Other countries: assumed mobile. */
-export const isMobile = (p) => !p.startsWith('+62') || /^\+628/.test(p);
 
 export function categoryOf(name) {
   const n = String(name || '').toLowerCase();
@@ -123,7 +122,7 @@ export async function syncVenues(venues) {
       const category = categoryOf(v.spotName);
       // Tags are added, never replaced: workflow tags that GHL set earlier stay.
       await addTags(contactId, ['vendor', 'venue-partner', ...(category ? [`venue-${category}`] : []), ...(v.optIn ? [TAGS.optin] : [])]);
-      results.push({ id, ok: true, contactId, isNew: Boolean(r.new), category, phone, whatsappPossible: phone ? isMobile(phone) : false });
+      results.push({ id, ok: true, contactId, isNew: Boolean(r.new), category, phone });
     } catch (e) {
       results.push({ id, ok: false, error: String(e.message || e).slice(0, 300) });
     }
@@ -156,6 +155,46 @@ export async function photosReceived(contactId) {
   return { ok: true };
 }
 
+const STATUS_OK = ['delivered', 'read'];
+const STATUS_BAD = ['failed', 'undelivered', 'error', 'rejected'];
+const newest = (list) => [...list].sort((a, b) => String(b.dateAdded || '').localeCompare(String(a.dateAdded || '')))[0] || null;
+
+/**
+ * What happened to the latest outbound WhatsApp message of each contact, read from its GHL conversation.
+ * status: read, delivered, sent (on its way or not confirmed), failed (not delivered), none (no outbound WhatsApp message found).
+ * replied: the venue wrote back. A failing contact does not stop the others.
+ */
+export async function deliveryStatus(contactIds) {
+  if (!Array.isArray(contactIds) || contactIds.length < 1 || contactIds.length > 12) throw new HttpError(400, 'contactIds must contain 1 to 12 items');
+  const loc = process.env.GHL_LOCATION_ID;
+  const results = [];
+  for (const contactId of contactIds) {
+    try {
+      const found = await ghl('GET', `/conversations/search?locationId=${encodeURIComponent(loc)}&contactId=${encodeURIComponent(contactId)}`);
+      const conv = (found.conversations || [])[0];
+      if (!conv) {
+        results.push({ contactId, status: 'none' });
+        continue;
+      }
+      const json = await ghl('GET', `/conversations/${conv.id}/messages?limit=40`);
+      const raw = json?.messages?.messages ?? json?.messages ?? [];
+      const wa = (Array.isArray(raw) ? raw : []).filter((m) => /whatsapp/i.test(String(m.messageType || m.type || '')));
+      const out = newest(wa.filter((m) => m.direction === 'outbound'));
+      if (!out) {
+        results.push({ contactId, status: 'none' });
+        continue;
+      }
+      const s = String(out.status || '').toLowerCase();
+      const status = STATUS_OK.includes(s) ? s : STATUS_BAD.includes(s) ? 'failed' : 'sent';
+      const err = out.error?.message ?? out.errorMessage ?? out.meta?.error?.message ?? out.meta?.errorMessage ?? out.meta?.reason ?? '';
+      results.push({ contactId, status, at: out.dateAdded || null, error: status === 'failed' ? String(err || '').slice(0, 300) : '', replied: wa.some((m) => m.direction === 'inbound') });
+    } catch (e) {
+      results.push({ contactId, status: 'error', error: String(e.message || e).slice(0, 200) });
+    }
+  }
+  return { results };
+}
+
 /** Which GHL account the contacts go to, and whether the fields exist. */
 export async function outreachStatus() {
   if (!configured()) return { configured: false };
@@ -182,4 +221,5 @@ export function outreachRoutes(app, ah) {
   app.post('/outreach/optin', ah(async (req, res) => res.json(await setOptIn(req.body?.contactId, Boolean(req.body?.value)))));
   app.post('/outreach/send', ah(async (req, res) => res.json(await sendOutreach(req.body || {}))));
   app.post('/outreach/photos-received', ah(async (req, res) => res.json(await photosReceived(req.body?.contactId))));
+  app.post('/outreach/delivery', ah(async (req, res) => res.json(await deliveryStatus(req.body?.contactIds))));
 }
