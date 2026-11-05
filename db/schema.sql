@@ -64,3 +64,30 @@ create table if not exists clicks (
 );
 create index if not exists clicks_post_idx on clicks (post_id, created_at desc);
 create index if not exists clicks_day_idx on clicks (created_at desc);
+
+-- Paid ads. One row per campaign (one ad set and one ad each at Meta). Status: draft, approved, pushed, active, paused, rejected, ended.
+create table if not exists ad_campaigns (
+  id serial primary key,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  status text not null default 'draft',
+  kind text not null default 'prospecting',
+  property_key text not null references properties(key) on delete cascade,
+  post_id int references posts(id) on delete set null,
+  name text not null,
+  optimize_for text not null default 'INITIATE_CHECKOUT',
+  daily_budget_usd numeric(8,2) not null,
+  start_date date not null,
+  end_date date,
+  max_cpa_usd numeric(8,2) not null default 40,
+  stop_no_checkout_usd numeric(8,2) not null default 60,
+  audience jsonb not null,
+  creative jsonb not null,
+  checks jsonb,
+  approved_at timestamptz,
+  meta jsonb,
+  feedback text,
+  error text
+);
+create index if not exists ad_campaigns_status_idx on ad_campaigns (status, created_at desc);
+create index if not exists ad_campaigns_property_idx on ad_campaigns (property_key, status);
