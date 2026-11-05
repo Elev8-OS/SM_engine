@@ -44,9 +44,39 @@ export async function graph(method, path, params = {}) {
   return json;
 }
 
-/** The ad account: currency, state and spend cap. Money fields come back in minor units (cents). */
+// Meta takes and returns budgets in the smallest unit of the account currency ("offset"): 100 for most currencies
+// (cents), 1 for currencies without minor units (JPY, KRW, VND ...). For other currencies (IDR) the offset is not
+// something to guess, because a wrong factor means a budget off by 100x. Order of trust:
+//   env      META_CURRENCY_OFFSET (set by you once you have checked the budget in Ads Manager)
+//   known    currencies where the offset is certain
+//   measured lifetime amount_spent (minor units) divided by lifetime spend (insights, major units)
+//   assumed  100; an ad is then sent paused, but cannot be switched on until the budget has been confirmed (see ads.js)
+const ZERO_DECIMAL = new Set(['JPY', 'KRW', 'VND', 'CLP', 'ISK', 'UGX', 'PYG', 'RWF', 'XAF', 'XOF', 'XPF', 'KMF', 'GNF', 'DJF', 'BIF', 'VUV']);
+const TWO_DECIMAL = new Set(['USD', 'EUR', 'CHF', 'GBP', 'AUD', 'CAD', 'NZD', 'SGD', 'HKD', 'SEK', 'NOK', 'DKK']);
+const OFFSETS = [1, 10, 100, 1000];
+
+async function currencyOffset(currency, rawSpent) {
+  const env = Number(process.env.META_CURRENCY_OFFSET);
+  if (OFFSETS.includes(env)) return { offset: env, source: 'env' };
+  if (ZERO_DECIMAL.has(currency)) return { offset: 1, source: 'known' };
+  if (TWO_DECIMAL.has(currency)) return { offset: 100, source: 'known' };
+  if (rawSpent > 0) {
+    const ins = await graph('GET', `${accountId()}/insights`, { fields: 'spend', date_preset: 'maximum' }).catch(() => null);
+    const spend = Number(ins?.data?.[0]?.spend);
+    if (spend > 0) {
+      const ratio = rawSpent / spend;
+      const snap = OFFSETS.reduce((best, c) => (Math.abs(Math.log(ratio / c)) < Math.abs(Math.log(ratio / best)) ? c : best), OFFSETS[0]);
+      if (Math.abs(Math.log(ratio / snap)) < 0.25) return { offset: snap, source: 'measured' };
+    }
+  }
+  return { offset: 100, source: 'assumed' };
+}
+
+/** The ad account: currency, state and spend cap. Money fields are converted from Meta's minor units to the account currency. */
 export async function accountInfo() {
   const a = await graph('GET', accountId(), { fields: 'name,currency,account_status,disable_reason,spend_cap,amount_spent' });
+  const raw = Number(a.amount_spent) || 0;
+  const { offset, source } = await currencyOffset(a.currency, raw);
   const cap = Number(a.spend_cap);
   return {
     id: a.id,
@@ -54,8 +84,10 @@ export async function accountInfo() {
     currency: a.currency,
     status: a.account_status, // 1 = active
     disableReason: a.disable_reason ?? null,
-    spendCap: cap > 0 ? cap / 100 : null, // 0 means no cap
-    amountSpent: Number(a.amount_spent) / 100 || 0
+    spendCap: cap > 0 ? cap / offset : null, // 0 means no cap
+    amountSpent: raw / offset,
+    offset,
+    offsetSource: source
   };
 }
 

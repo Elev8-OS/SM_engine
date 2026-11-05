@@ -3,10 +3,13 @@ import { HttpError } from './util.js';
 import { audiencePlan } from './audience.js';
 import { mediaUrls } from './posts.js';
 import { accountInfo, pixelStatus, metaConfig } from './meta.js';
+import { usdRates, toUsd, fromUsd, roundBudget, fxView, PROPERTY_CURRENCY } from './fx.js';
 
 // Ads planner, step 1: drafts, checks, editing and approval. Nothing here creates anything at Meta yet.
 // Flow: draft -> approved -> (step 2: pushed paused to Meta -> active). The creative is an approved post (reel or carousel).
-// Money is planned in USD; the ad account must be in USD too (checked), so budgets map one to one.
+// Currencies: money is planned in USD (budget, price limits). The ad account runs in its own currency (IDR) and the
+// properties are in CHF. Budgets are converted to the account currency when sent to Meta (see fx.js), and every figure is
+// shown in all three currencies so nothing has to be converted in the head.
 
 const SITE_URL = 'https://www.elevate-villas.com';
 const DAY = 86400000;
@@ -82,15 +85,28 @@ async function metaState(force = false) {
   return out;
 }
 
+/** A USD amount in the account currency (rounded for budgets) and in the property currency. Missing rates give null, never a wrong number. */
+function convert(ctx, usd) {
+  const cur = ctx.meta.account?.currency ?? null;
+  const rates = ctx.fx?.rates || {};
+  return {
+    usd: round2(usd),
+    account: cur && rates[cur] > 0 ? roundBudget(fromUsd(usd, cur, rates), cur) : null,
+    property: rates[PROPERTY_CURRENCY] > 0 ? round2(fromUsd(usd, PROPERTY_CURRENCY, rates)) : null
+  };
+}
+
 /**
  * Checks for one ad. phase 'approve' must pass before approval, phase 'activate' before it can go live (step 2).
  * level 'block' stops, 'warn' only informs. Results are keys with params; the app writes the texts.
  */
-function buildChecks(c, { post, meta, plan, settings, committedOthers }) {
+function buildChecks(c, { post, meta, fx, plan, settings, committedOthers }) {
   const out = [];
   const add = (key, ok, params = {}, phase = 'approve', level = 'block') => out.push({ key, ok: Boolean(ok), level: ok ? 'ok' : level, phase, params });
   const monthly = Number(c.daily_budget_usd) * 30;
   const cfg = meta.config;
+  const cur = meta.account?.currency ?? null;
+  const rate = cur && fx?.rates ? fx.rates[cur] : null;
 
   add('post_ready', post && LIVE_POST.includes(post.status), { status: post?.status ?? 'missing' });
   add('media', (c.creative?.mediaKeys || []).length > 0, { count: (c.creative?.mediaKeys || []).length });
@@ -98,14 +114,25 @@ function buildChecks(c, { post, meta, plan, settings, committedOthers }) {
   const missing = [!cfg.token && 'META_ADS_TOKEN', !cfg.account && 'META_AD_ACCOUNT_ID', !cfg.page && 'META_PAGE_ID', !cfg.pixelId && 'META_PIXEL_ID'].filter(Boolean);
   add('meta_setup', !missing.length, { missing });
   add('account_ok', meta.account && meta.account.status === 1, { status: meta.account?.status ?? null, error: meta.errors.account ?? null });
-  add('currency', meta.account?.currency === 'USD', { currency: meta.account?.currency ?? null });
+  // The account may run in any currency: what counts is that there is a rate to convert the USD plan into it.
+  add('currency', Boolean(meta.account && rate > 0), { currency: cur, rate: rate ?? null, date: fx?.date ?? null, source: fx?.source ?? null, propertyCurrency: PROPERTY_CURRENCY, error: fx?.error ?? null });
   add('budget_cap', committedOthers + monthly <= settings.monthlyBudgetUsd + 0.01, { committed: round2(committedOthers), thisAd: round2(monthly), cap: settings.monthlyBudgetUsd });
 
   const cap = meta.account?.spendCap;
-  add('account_spend_cap', cap == null || cap - (meta.account?.amountSpent || 0) >= monthly, { cap: cap ?? null, spent: meta.account?.amountSpent ?? null }, 'approve', 'warn');
+  const remainingUsd = cap != null && rate > 0 ? toUsd(cap - (meta.account.amountSpent || 0), cur, fx.rates) : null;
+  add(
+    'account_spend_cap',
+    cap == null || remainingUsd == null || remainingUsd >= monthly,
+    { cap: cap ?? null, spent: meta.account?.amountSpent ?? null, currency: cur, remainingUsd: remainingUsd == null ? null : round2(remainingUsd), monthlyUsd: round2(monthly) },
+    'approve',
+    'warn'
+  );
 
   const v = plan?.villas?.find((x) => x.key === c.property_key);
   add('free_nights', v && v.freeNights > 0, { freeNights: v?.freeNights ?? null, days: plan?.horizonDays ?? null }, 'approve', 'warn');
+
+  // Before switching on: the unit Meta uses for amounts in this currency must be certain, or a budget could be off by 100x.
+  add('budget_units', !meta.account || meta.account.offsetSource !== 'assumed', { currency: cur, offset: meta.account?.offset ?? null, source: meta.account?.offsetSource ?? null }, 'activate');
 
   const ev = meta.pixel?.events || {};
   add('pixel_events', (ev.InitiateCheckout || 0) > 0, { initiateCheckout: ev.InitiateCheckout || 0, pageView: ev.PageView || 0, purchase: ev.Purchase || 0, lastFired: meta.pixel?.lastFired ?? null, error: meta.errors.pixel ?? null }, 'activate');
@@ -119,7 +146,9 @@ async function context(force = false) {
     audiencePlan({ days: 60 }).catch(() => null),
     q('select coalesce(sum(daily_budget_usd), 0)::float * 30 as monthly from ad_campaigns where status = any($1)', [COMMITTED])
   ]);
-  return { meta, plan, settings: adsSettings(), committed: committedRow[0].monthly };
+  const cur = meta.account?.currency;
+  const fx = await usdRates(cur ? [cur] : []).catch((e) => ({ rates: { USD: 1 }, date: null, source: null, stale: false, error: String(e.message || e) }));
+  return { meta, plan, fx, settings: adsSettings(), committed: committedRow[0].monthly };
 }
 
 async function views(rows, ctx) {
@@ -127,6 +156,7 @@ async function views(rows, ctx) {
   const posts = new Map(
     (ids.length ? await q(`select id, format, pillar, status, to_char(plan_date, 'YYYY-MM-DD') as plan_date from posts where id = any($1)`, [ids]) : []).map((p) => [p.id, p])
   );
+  const cur = ctx.meta.account?.currency ?? null;
   return Promise.all(
     rows.map(async (r) => {
       const post = posts.get(r.post_id) || null;
@@ -151,7 +181,16 @@ async function views(rows, ctx) {
         audience: r.audience,
         creative: { ...r.creative, mediaUrls: await mediaUrls({ media: { keys: r.creative?.mediaKeys || [] } }).catch(() => []) },
         estimate: { days, spendUsd: round2(spend), bookingsAtMaxCpa: round2(spend / Number(r.max_cpa_usd)) },
-        checks: buildChecks(r, { post, meta: ctx.meta, plan: ctx.plan, settings: ctx.settings, committedOthers: ctx.committed - own }),
+        // The same amounts in the account currency and the property currency (null when a rate is missing).
+        money: {
+          accountCurrency: cur,
+          propertyCurrency: PROPERTY_CURRENCY,
+          daily: convert(ctx, Number(r.daily_budget_usd)),
+          maxCpa: convert(ctx, Number(r.max_cpa_usd)),
+          stopNoCheckout: convert(ctx, Number(r.stop_no_checkout_usd)),
+          estimateSpend: convert(ctx, spend)
+        },
+        checks: buildChecks(r, { post, meta: ctx.meta, fx: ctx.fx, plan: ctx.plan, settings: ctx.settings, committedOthers: ctx.committed - own }),
         approvedAt: r.approved_at,
         feedback: r.feedback,
         error: r.error,
@@ -178,7 +217,14 @@ export async function listAds({ refresh = false } = {}) {
   const m = ctx.meta;
   return {
     settings: ctx.settings,
-    budget: { monthlyUsd: ctx.settings.monthlyBudgetUsd, committedUsd: round2(ctx.committed), freeUsd: round2(ctx.settings.monthlyBudgetUsd - ctx.committed) },
+    budget: {
+      monthlyUsd: ctx.settings.monthlyBudgetUsd,
+      committedUsd: round2(ctx.committed),
+      freeUsd: round2(ctx.settings.monthlyBudgetUsd - ctx.committed),
+      monthly: convert(ctx, ctx.settings.monthlyBudgetUsd),
+      committed: convert(ctx, ctx.committed)
+    },
+    fx: fxView(ctx.fx, m.account?.currency ?? null),
     meta: {
       version: m.config.version,
       configured: { token: m.config.token, account: Boolean(m.config.account), page: m.config.page, instagram: m.config.instagram, pixel: Boolean(m.config.pixelId) },
