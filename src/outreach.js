@@ -162,6 +162,27 @@ const STATUS_OK = ['delivered', 'read'];
 const STATUS_BAD = ['failed', 'undelivered', 'error', 'rejected'];
 const newest = (list) => [...list].sort((a, b) => String(b.dateAdded || '').localeCompare(String(a.dateAdded || '')))[0] || null;
 
+// The reason GHL shows for a failed message (for example Meta's per-user marketing limit, error 131049) sits in a field
+// whose name is not documented. The usual places are tried first; otherwise the message object is searched for text that
+// reads like a delivery error. The text of the message itself (top-level body, message, html) is skipped.
+const ERROR_TEXT = /quality standards|per-user|template limit|131049|131026|131047|131048|131056|not (?:a )?(?:valid )?whatsapp|not registered|undeliverable|re-?engagement|opted? ?out|invalid (?:phone|number|recipient|parameter)|rejected|blocked/i;
+function errorText(m) {
+  const seen = new Set();
+  const walk = (v, depth) => {
+    if (v == null || depth > 5) return '';
+    if (typeof v === 'string') return v.length < 400 && ERROR_TEXT.test(v) ? v : '';
+    if (typeof v !== 'object' || seen.has(v)) return '';
+    seen.add(v);
+    for (const k of Object.keys(v)) {
+      if (depth === 0 && /^(body|message|html|text|attachments|subject)$/i.test(k)) continue;
+      const r = walk(v[k], depth + 1);
+      if (r) return r;
+    }
+    return '';
+  };
+  return walk(m, 0);
+}
+
 /**
  * What happened to the latest outbound WhatsApp message of each contact, read from its GHL conversation.
  * status: read, delivered, sent (on its way or not confirmed), failed (not delivered), none (no outbound WhatsApp message found).
@@ -189,8 +210,9 @@ export async function deliveryStatus(contactIds) {
       }
       const s = String(out.status || '').toLowerCase();
       const status = STATUS_OK.includes(s) ? s : STATUS_BAD.includes(s) ? 'failed' : 'sent';
-      const err = out.error?.message ?? out.errorMessage ?? out.meta?.error?.message ?? out.meta?.errorMessage ?? out.meta?.reason ?? '';
-      results.push({ contactId, status, at: out.dateAdded || null, error: status === 'failed' ? String(err || '').slice(0, 300) : '', replied: wa.some((m) => m.direction === 'inbound') });
+      const known = out.error?.message ?? out.errorMessage ?? out.meta?.error?.message ?? out.meta?.errorMessage ?? out.meta?.reason ?? '';
+      const err = status === 'failed' ? String(known || errorText(out) || '') : '';
+      results.push({ contactId, status, at: out.dateAdded || null, error: err.slice(0, 300), replied: wa.some((m) => m.direction === 'inbound') });
     } catch (e) {
       results.push({ contactId, status: 'error', error: String(e.message || e).slice(0, 200) });
     }
