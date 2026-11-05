@@ -45,13 +45,14 @@ export async function graph(method, path, params = {}) {
 }
 
 // Meta takes and returns budgets in the smallest unit of the account currency ("offset"): 100 for most currencies
-// (cents), 1 for currencies without minor units (JPY, KRW, VND ...). For other currencies (IDR) the offset is not
-// something to guess, because a wrong factor means a budget off by 100x. Order of trust:
+// (cents), 1 for currencies without minor units. A wrong factor means a budget off by 100x, so it is not guessed.
+// Order of trust:
 //   env      META_CURRENCY_OFFSET (set by you once you have checked the budget in Ads Manager)
-//   known    currencies where the offset is certain
+//   known    currencies where the offset is certain. IDR is 1: the spend limit of the Elevate Villas account reads
+//            Rp 11.000.000 in Ads Manager and comes back from the API as 11000000, checked in November 2026.
 //   measured lifetime amount_spent (minor units) divided by lifetime spend (insights, major units)
 //   assumed  100; an ad is then sent paused, but cannot be switched on until the budget has been confirmed (see ads.js)
-const ZERO_DECIMAL = new Set(['JPY', 'KRW', 'VND', 'CLP', 'ISK', 'UGX', 'PYG', 'RWF', 'XAF', 'XOF', 'XPF', 'KMF', 'GNF', 'DJF', 'BIF', 'VUV']);
+const ZERO_DECIMAL = new Set(['IDR', 'JPY', 'KRW', 'VND', 'CLP', 'ISK', 'UGX', 'PYG', 'RWF', 'XAF', 'XOF', 'XPF', 'KMF', 'GNF', 'DJF', 'BIF', 'VUV']);
 const TWO_DECIMAL = new Set(['USD', 'EUR', 'CHF', 'GBP', 'AUD', 'CAD', 'NZD', 'SGD', 'HKD', 'SEK', 'NOK', 'DKK']);
 const OFFSETS = [1, 10, 100, 1000];
 
