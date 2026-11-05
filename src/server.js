@@ -19,6 +19,7 @@ import { agentPublic, agentPrivate } from './agent/routes.js';
 import { insightsRoutes } from './insights.js';
 import { brandRoutes } from './brand.js';
 import { adsRoutes } from './ads.js';
+import { adsLiveRoutes, startAdsMonitor } from './ads-live.js';
 
 const app = express();
 app.use(express.json({ limit: '60mb' }));
@@ -219,6 +220,7 @@ insightsRoutes(app, needDb, ah);
 draftingRoutes(app, needDb, ah);
 brandRoutes(app, ah);
 adsRoutes(app, needDb, ah);
+adsLiveRoutes(app, needDb, ah);
 
 app.use((err, _req, res, _next) => {
   if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
@@ -232,3 +234,4 @@ if (dbEnabled()) {
 
 const port = Number(process.env.PORT) || 3000;
 app.listen(port, () => console.log(`SM_engine listening on ${port}`));
+startAdsMonitor();
