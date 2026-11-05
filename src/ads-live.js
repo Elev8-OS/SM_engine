@@ -1,13 +1,17 @@
 import { dbEnabled, q } from './db.js';
 import { HttpError } from './util.js';
 import { adView } from './ads.js';
-import { accountId, graph, metaConfig, pixelStatus } from './meta.js';
+import { accountId, accountInfo, graph, metaConfig, pixelStatus } from './meta.js';
+import { usdRates, toUsd, fromUsd, roundBudget, fmtMoney, PROPERTY_CURRENCY } from './fx.js';
 
 // Ads planner, step 2: send an approved ad to Meta (everything is created PAUSED), switch it on, pause it and watch it.
 // Sending runs in the background (Meta needs time to process a video); the screen refreshes until meta.pushing is false.
+// Currencies: the plan is in USD, the ad account in its own currency (IDR). The daily budget is converted when the ad is
+// sent and checked again when it is switched on; spend coming back is converted to USD before it meets a USD limit.
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const usd = (n) => `$${Number(n).toFixed(2)}`;
+const r2 = (x) => Math.round(x * 100) / 100;
 const row = async (id) => {
   const r = await q(`select *, to_char(end_date, 'YYYY-MM-DD') as end_day from ad_campaigns where id = $1`, [id]);
   if (!r.length) throw new HttpError(404, 'Ad not found');
@@ -17,6 +21,14 @@ const patchMeta = (id, patch) => q(`update ad_campaigns set meta = coalesce(meta
 const baliToday = () => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
 
 const blockers = (v, phase) => v.checks.filter((c) => c.phase === phase && !c.ok && c.level === 'block');
+
+/** The daily budget of an ad in the account currency and in Meta's minor units. */
+async function budgetFor(dailyUsd) {
+  const acct = await accountInfo();
+  const fx = await usdRates([acct.currency]);
+  const account = roundBudget(fromUsd(dailyUsd, acct.currency, fx.rates), acct.currency);
+  return { acct, fx, currency: acct.currency, account, minor: Math.round(account * acct.offset) };
+}
 
 /** The Instagram account Meta lets this ad account advertise with (null: the ad then runs under the Facebook page). */
 async function instagramUserId() {
@@ -85,16 +97,24 @@ async function runPush(id) {
       await patchMeta(id, { videoId: video.id });
     }
 
+    // The budget in the account currency, converted now at today's rate.
+    const b = await budgetFor(v.dailyBudgetUsd);
+
     // Campaign with its own daily budget, spread by Meta. Always created paused.
     const campaign = await graph('POST', `${accountId()}/campaigns`, {
       name: v.name,
       objective: 'OUTCOME_SALES',
       status: 'PAUSED',
       special_ad_categories: [],
-      daily_budget: Math.round(v.dailyBudgetUsd * 100),
+      daily_budget: b.minor,
       bid_strategy: 'LOWEST_COST_WITHOUT_CAP'
     });
     created.campaignId = campaign.id;
+    // Read the budget back: if Meta stored something else than what was sent, nothing is left at Meta.
+    const back = await graph('GET', campaign.id, { fields: 'daily_budget' });
+    if (Number(back.daily_budget) !== b.minor) {
+      throw new HttpError(502, `Meta stored the daily budget as ${back.daily_budget} instead of ${b.minor} (${fmtMoney(b.account, b.currency)}). Nothing was left at Meta.`);
+    }
 
     const targeting = {
       geo_locations: { countries: v.audience.countries },
@@ -138,7 +158,21 @@ async function runPush(id) {
 
     await q(`update ad_campaigns set status = 'pushed', error = null, meta = coalesce(meta, '{}'::jsonb) || $2::jsonb, updated_at = now() where id = $1`, [
       id,
-      JSON.stringify({ pushing: false, campaignId: campaign.id, adsetId: adset.id, creativeId: creative.id, adId: ad.id, instagramUserId: igUser, pushedAt: new Date().toISOString() })
+      JSON.stringify({
+        pushing: false,
+        campaignId: campaign.id,
+        adsetId: adset.id,
+        creativeId: creative.id,
+        adId: ad.id,
+        instagramUserId: igUser,
+        pushedAt: new Date().toISOString(),
+        budgetCurrency: b.currency,
+        dailyBudgetAccount: b.account,
+        budgetOffset: b.acct.offset,
+        budgetOffsetSource: b.acct.offsetSource,
+        fxRate: b.fx.rates[b.currency],
+        fxDate: b.fx.date
+      })
     ]);
   } catch (e) {
     // Nothing half-built stays at Meta: deleting the campaign removes its ad set and ad.
@@ -171,7 +205,11 @@ async function setMetaStatus(m, status) {
   await graph('POST', m.adId, { status });
 }
 
-/** Switch on. Needs the pixel to have received InitiateCheckout events (fresh read) and the approval checks to still hold. */
+/**
+ * Switch on. Needs the pixel to have received InitiateCheckout events (fresh read), the approval checks to still hold and
+ * the amount unit of the account currency to be certain. If the exchange rate moved by more than 3 per cent since the ad
+ * was sent, the budget at Meta is brought back to the planned USD amount first.
+ */
 export async function activateAd(id) {
   const v = await adView(id);
   if (!['pushed', 'paused'].includes(v.status)) throw new HttpError(409, `Ad ${id} is ${v.status}; only an ad that is at Meta can be switched on`);
@@ -179,10 +217,21 @@ export async function activateAd(id) {
   if (!m.campaignId || !m.adsetId || !m.adId) throw new HttpError(409, 'This ad has no objects at Meta yet');
   const blocked = blockers(v, 'approve');
   if (blocked.length) throw new HttpError(409, `Checks failed: ${blocked.map((c) => c.key).join(', ')}`);
+  const units = v.checks.find((c) => c.key === 'budget_units');
+  if (units && !units.ok) {
+    throw new HttpError(409, `The amount unit for ${units.params.currency || 'this currency'} is only assumed (factor ${units.params.offset}). Check the daily budget of the campaign in Ads Manager, then set META_CURRENCY_OFFSET=${units.params.offset} in Railway.`);
+  }
   const px = await pixelStatus();
   if (!((px.events.InitiateCheckout || 0) > 0)) {
     throw new HttpError(409, `The pixel has received no InitiateCheckout event in the last 7 days (PageView: ${px.events.PageView || 0}). Without it Meta cannot optimise this ad.`);
   }
+
+  const b = await budgetFor(v.dailyBudgetUsd);
+  if (m.dailyBudgetAccount && Math.abs(b.account / Number(m.dailyBudgetAccount) - 1) > 0.03) {
+    await graph('POST', m.campaignId, { daily_budget: b.minor });
+    await patchMeta(id, { budgetCurrency: b.currency, dailyBudgetAccount: b.account, budgetOffset: b.acct.offset, budgetOffsetSource: b.acct.offsetSource, fxRate: b.fx.rates[b.currency], fxDate: b.fx.date });
+  }
+
   await setMetaStatus(m, 'ACTIVE');
   await q(`update ad_campaigns set status = 'active', error = null, updated_at = now() where id = $1`, [id]);
   await patchMeta(id, { activatedAt: new Date().toISOString() });
@@ -208,26 +257,65 @@ const countAction = (actions, names) => {
 };
 
 /**
- * Watch the running ads: store the numbers, pause an ad that spent its limit without a single InitiateCheckout,
- * and mark ads whose end date has passed. Scaling a budget is never done automatically.
+ * Watch the running ads: store the numbers (in the account currency, in USD and in the property currency), pause an ad
+ * that spent its USD limit without a single InitiateCheckout, and mark ads whose end date has passed.
+ * Scaling a budget is never done automatically.
  */
 export async function monitorAds() {
   const rows = await q(`select *, to_char(end_date, 'YYYY-MM-DD') as end_day from ad_campaigns where status = 'active'`);
+  if (!rows.length) return [];
+  let acct = null;
+  let fx = null;
+  try {
+    acct = await accountInfo();
+    fx = await usdRates([acct.currency]);
+  } catch (e) {
+    console.error('ads monitor: account or rate not available:', e.message);
+  }
   const results = [];
   for (const r of rows) {
     const m = r.meta || {};
     try {
-      const ins = await graph('GET', `${m.campaignId}/insights`, { fields: 'spend,impressions,clicks,actions', date_preset: 'maximum' });
+      const cur = acct?.currency || m.budgetCurrency || 'USD';
+      // Fresh rate, else the one stored when the ad was sent: the protective rule must still work if the rate service is down.
+      const rate = cur === 'USD' ? 1 : fx?.rates?.[cur] || Number(m.fxRate) || null;
+      const propRate = fx?.rates?.[PROPERTY_CURRENCY] || null;
+      const ins = await graph('GET', `${m.campaignId}/insights`, { fields: 'spend,impressions,clicks,actions,action_values', date_preset: 'maximum' });
       const d = ins.data?.[0] || {};
       const spend = Number(d.spend) || 0;
       const checkouts = countAction(d.actions, CHECKOUT);
       const purchases = countAction(d.actions, PURCHASE);
-      const snapshot = { at: new Date().toISOString(), spend, impressions: Number(d.impressions) || 0, clicks: Number(d.clicks) || 0, checkouts, purchases, cpa: purchases ? Math.round((spend / purchases) * 100) / 100 : null };
+      const value = countAction(d.action_values, PURCHASE);
+      const spendUsd = rate ? spend / rate : null;
+      const toProp = (amount) => (rate && propRate ? r2((amount / rate) * propRate) : null);
+      const snapshot = {
+        at: new Date().toISOString(),
+        currency: cur,
+        propertyCurrency: PROPERTY_CURRENCY,
+        spend,
+        spendUsd: spendUsd == null ? null : r2(spendUsd),
+        spendProperty: toProp(spend),
+        impressions: Number(d.impressions) || 0,
+        clicks: Number(d.clicks) || 0,
+        checkouts,
+        purchases,
+        cpa: purchases ? r2(spend / purchases) : null,
+        cpaUsd: purchases && spendUsd != null ? r2(spendUsd / purchases) : null,
+        cpaProperty: purchases ? toProp(spend / purchases) : null,
+        purchaseValue: value,
+        purchaseValueProperty: toProp(value),
+        roas: spend > 0 && value > 0 ? r2(value / spend) : null
+      };
       await patchMeta(r.id, { insights: snapshot });
       let action = 'ok';
-      if (spend >= Number(r.stop_no_checkout_usd) && checkouts === 0) {
+      if (spendUsd == null) {
+        action = 'no_rate';
+      } else if (spendUsd >= Number(r.stop_no_checkout_usd) && checkouts === 0) {
         await setMetaStatus(m, 'PAUSED');
-        await q(`update ad_campaigns set status = 'paused', error = $2, updated_at = now() where id = $1`, [r.id, `Paused automatically: ${usd(spend)} spent without an InitiateCheckout (limit ${usd(r.stop_no_checkout_usd)}).`]);
+        await q(`update ad_campaigns set status = 'paused', error = $2, updated_at = now() where id = $1`, [
+          r.id,
+          `Paused automatically: ${fmtMoney(spend, cur)} (${usd(spendUsd)}) spent without an InitiateCheckout (limit ${usd(r.stop_no_checkout_usd)}).`
+        ]);
         action = 'paused_no_checkout';
       } else if (r.end_day && r.end_day < baliToday()) {
         await q(`update ad_campaigns set status = 'ended', updated_at = now() where id = $1`, [r.id]);
