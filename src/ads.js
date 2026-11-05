@@ -382,7 +382,8 @@ export async function approveAd(id) {
   if (v.status !== 'draft') throw new HttpError(409, `Ad ${id} is ${v.status}; only a draft can be approved`);
   const blocked = v.checks.filter((c) => c.phase === 'approve' && !c.ok && c.level === 'block');
   if (blocked.length) throw new HttpError(409, `Checks failed: ${blocked.map((c) => c.key).join(', ')}`);
-  await q(`update ad_campaigns set status = 'approved', checks = $2, approved_at = now(), error = null, updated_at = now() where id = $1`, [id, v.checks]);
+  // checks is a list: node-pg turns a JS array into a Postgres array literal, which is not valid JSON. It must go in as a JSON string.
+  await q(`update ad_campaigns set status = 'approved', checks = $2::jsonb, approved_at = now(), error = null, updated_at = now() where id = $1`, [id, JSON.stringify(v.checks)]);
   return adView(id);
 }
 
