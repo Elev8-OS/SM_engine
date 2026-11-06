@@ -1,0 +1,38 @@
+{
+  "key": "tambora",
+  "name": "The R Villa Tambora",
+  "updated": "2026-11-06",
+  "guestsMax": 6,
+  "bedrooms": 3,
+  "bathrooms": 3,
+  "bedroomsText": "3, each with a king-size bed and its own bathroom",
+  "facts": [
+    { "text": "Sleeps up to 6 guests.", "status": "elev8", "source": "Elev8 maximum capacity, 2026-11-06" },
+    { "text": "3 bedrooms, each with a king-size bed and a bathroom connected to it.", "status": "elev8", "source": "Elev8 questionnaire, 2026-11-06" },
+    { "text": "Private pool.", "status": "elev8", "source": "Elev8 questionnaire (outdoor amenities)", "tags": ["pool"] },
+    { "text": "A private garden, a private entrance and outdoor seating.", "status": "elev8", "source": "Elev8 questionnaire (outdoor amenities)", "tags": ["garden"] },
+    { "text": "Free parking on the premises.", "status": "elev8", "source": "Elev8 questionnaire" },
+    { "text": "Single-level villa.", "status": "elev8", "source": "Elev8 questionnaire (number of floors)" },
+    { "text": "Air conditioning, WiFi, a TV and a stereo sound system.", "status": "elev8", "source": "Elev8 questionnaire" },
+    { "text": "Kitchen with stove, microwave, kettle, coffee maker, toaster, blender and a refrigerator with freezer; dining table.", "status": "elev8", "source": "Elev8 questionnaire" },
+    { "text": "Hair dryer, iron and ironing board; linens, towels and toiletries are provided.", "status": "elev8", "source": "Elev8 questionnaire" },
+    { "text": "A crib is available.", "status": "elev8", "source": "Elev8 questionnaire (additional sleeping arrangements)" },
+    { "text": "On Jalan Pantai Batu Mejan in Canggu.", "status": "elev8", "source": "Elev8 questionnaire (address)" }
+  ],
+  "absent": [],
+  "open": [
+    "No view claims (rice fields, sunset, ocean) are confirmed.",
+    "The villa is not beachfront. Distances to Echo Beach, La Brisa and the market are not known. Do not state any.",
+    "Elev8 lists a size of 250 without saying what it measures (plot or building). Do not state a size.",
+    "Heating is listed in the questionnaire but is unlikely in Bali. Do not mention it.",
+    "Hot tub, barbecue, gym, cinema and rooftop are not confirmed. Do not mention them.",
+    "Everything on this sheet comes from the Elev8 questionnaire and is still to be confirmed by the owner."
+  ],
+  "catalog": [
+    "Sleeps up to 6 guests in 3 bedrooms with king-size beds, each with its own bathroom.",
+    "Private pool, private garden and outdoor seating.",
+    "Air conditioning, WiFi, TV and a fully equipped kitchen.",
+    "Single-level villa with free parking on the premises.",
+    "On Jalan Pantai Batu Mejan in Canggu."
+  ]
+}

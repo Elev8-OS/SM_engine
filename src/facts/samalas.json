@@ -1,7 +1,7 @@
 {
   "key": "samalas",
   "name": "The R Villa Samalas",
-  "updated": "2026-11-03",
+  "updated": "2026-11-06",
   "guestsMax": 10,
   "bedrooms": 4,
   "bathrooms": 3,
@@ -36,5 +36,12 @@
     "Whether a crib and highchair are kept on site is unclear (the questionnaire says yes, the add-on says order in advance). Do not mention them.",
     "Hot tub, barbecue, gym, cinema and rooftop are not confirmed. Do not mention them.",
     "A cleaning fee is not stored yet. Do not state an amount and do not say there is none: say the final price with all fees is shown on the booking page."
+  ],
+  "catalog": [
+    "Sleeps up to 10 guests in 4 bedrooms: three with a king bed and their own bathroom, one with bunk beds, plus a sofa bed in the living room.",
+    "Private pool with a pool deck and a garden. The plot is 300 m² including garden, pool and deck.",
+    "In a quiet residential lane in Pererenan, with a cafe, a 24-hour shop and a spa a few minutes on foot.",
+    "Air conditioning, WiFi, TV, safe and a fully equipped kitchen. No bathtub.",
+    "Parking in front of the gate for one car."
   ]
 }

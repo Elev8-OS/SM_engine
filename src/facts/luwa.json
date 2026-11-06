@@ -1,0 +1,37 @@
+{
+  "key": "luwa",
+  "name": "The R Villa Luwa",
+  "updated": "2026-11-06",
+  "guestsMax": 10,
+  "bedrooms": 5,
+  "bathrooms": 5,
+  "bedroomsText": "5 (4 with a king-size bed, 1 with a queen-size bed), each with its own bathroom",
+  "facts": [
+    { "text": "Sleeps up to 10 guests.", "status": "elev8", "source": "Elev8 maximum capacity, 2026-11-06" },
+    { "text": "5 bedrooms: 4 with a king-size bed and 1 with a queen-size bed. Each bedroom has its own bathroom, 5 bathrooms in total.", "status": "elev8", "source": "Elev8 questionnaire, 2026-11-06" },
+    { "text": "The master bathroom has a freestanding bathtub.", "status": "elev8", "source": "Elev8 questionnaire", "tags": ["bathtub"] },
+    { "text": "Private pool.", "status": "elev8", "source": "Elev8 questionnaire (outdoor amenities)", "tags": ["pool"] },
+    { "text": "A garden, a barbecue grill, a patio or balcony and a private entrance.", "status": "elev8", "source": "Elev8 questionnaire (outdoor amenities)", "tags": ["garden", "bbq"] },
+    { "text": "Free parking on the premises and on the street.", "status": "elev8", "source": "Elev8 questionnaire" },
+    { "text": "Single-level home.", "status": "elev8", "source": "Elev8 questionnaire" },
+    { "text": "A sound system in all rooms and the garden; air conditioning that can be controlled from a smartphone; WiFi.", "status": "elev8", "source": "Elev8 questionnaire" },
+    { "text": "Kitchen with stove, oven, microwave, kettle, coffee maker, dishwasher and refrigerator; dining table; a washer.", "status": "elev8", "source": "Elev8 questionnaire" },
+    { "text": "A crib and a high chair are available.", "status": "elev8", "source": "Elev8 questionnaire (family amenities)" },
+    { "text": "In Pererenan near Canggu, about 45 to 60 minutes by car from Ngurah Rai Airport.", "status": "elev8", "source": "Elev8 questionnaire (how to find the property)" }
+  ],
+  "absent": [],
+  "open": [
+    "The questionnaire description mentions a private sandy beach by the pool, 360-degree views, a personal butler and a private chef. These are marketing statements and not confirmed. Do not mention them.",
+    "The villa is not beachfront. No view claims (rice fields, sunset, ocean) are confirmed.",
+    "No size is known. Do not state one.",
+    "Hot tub, gym, cinema and rooftop are not confirmed. Do not mention them.",
+    "Everything on this sheet comes from the Elev8 questionnaire and is still to be confirmed by the owner."
+  ],
+  "catalog": [
+    "Sleeps up to 10 guests in 5 bedrooms (4 with a king-size bed, 1 with a queen-size bed), each with its own bathroom.",
+    "The master bathroom has a freestanding bathtub.",
+    "Private pool, garden, barbecue grill and a patio or balcony.",
+    "Sound system in all rooms and the garden, air conditioning you can control from your phone, WiFi, dishwasher and washer.",
+    "Free parking on the premises. About 45 to 60 minutes by car from Ngurah Rai Airport."
+  ]
+}

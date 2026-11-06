@@ -89,14 +89,17 @@ export function productUrl(baseUrl, key) {
 const USABLE = new Set(['confirmed', 'elev8']);
 
 /**
- * Product text from the fact sheet: only confirmed or Elev8 facts and what is NOT available. Facts that are not confirmed
- * (the open list) never go in. Without a sheet the highlights of the property are used.
+ * Product text. When the fact sheet has a "catalog" list (short sentences written for guests, each one taken from the facts)
+ * exactly those sentences are used. Without it the confirmed and Elev8 facts and what is NOT available are used. Facts that
+ * are not confirmed (the open list) never go in. Without a sheet the highlights of the property are used.
  */
 export function describeVilla(prop, sheet, fromLine = '') {
   const intro = `${prop.name}${prop.area ? ` in ${prop.area}, Bali` : ' in Bali'}.`;
   const parts = [];
   if (fromLine) parts.push(fromLine);
-  if (sheet) {
+  if (sheet && Array.isArray(sheet.catalog) && sheet.catalog.length) {
+    for (const t of sheet.catalog) if (t) parts.push(String(t).trim());
+  } else if (sheet) {
     for (const x of sheet.facts || []) if (USABLE.has(x.status) && x.text) parts.push(String(x.text).trim());
     for (const a of sheet.absent || []) if (a.text) parts.push(String(a.text).trim());
   } else {
