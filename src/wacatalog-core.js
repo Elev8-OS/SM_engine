@@ -110,11 +110,28 @@ export function describeVilla(prop, sheet, fromLine = '') {
   return text.length > 4000 ? `${text.slice(0, 3990).replace(/\s+\S*$/, '')}.` : text;
 }
 
-/** Images of an Elev8 listing in gallery order, as public URLs, at most max. */
+/**
+ * Images of an Elev8 listing in gallery order, as public URLs, at most max.
+ * One listing id can hold the galleries of several listings (the apartment categories). Each gallery numbers its photos from 1,
+ * so sorting everything together mixes the galleries. The gallery of the listing that comes first is used; a very short one
+ * (fewer than 4 photos) gives way to the longest.
+ */
 export function galleryUrls(results, max = 10) {
+  const usable = (results || []).filter((x) => x && typeof x.image_url === 'string' && /^https:\/\//.test(x.image_url));
+  const groups = new Map();
+  for (const x of usable) {
+    const k = String(x.listing_name || '');
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(x);
+  }
+  const all = [...groups.values()];
+  let chosen = all[0] || [];
+  if (chosen.length < 4) {
+    const longest = [...all].sort((a, b) => b.length - a.length)[0];
+    if (longest && longest.length > chosen.length) chosen = longest;
+  }
   const seen = new Set();
-  return (results || [])
-    .filter((x) => x && typeof x.image_url === 'string' && /^https:\/\//.test(x.image_url))
+  return [...chosen]
     .sort((a, b) => (a.sequence ?? 999) - (b.sequence ?? 999))
     .map((x) => x.image_url)
     .filter((u) => (seen.has(u) ? false : (seen.add(u), true)))
