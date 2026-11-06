@@ -90,6 +90,24 @@ function storySpec(v, { pageId, igUser, video }) {
   };
 }
 
+/**
+ * Targeting of the ad set. With Advantage+ audience (Meta's default for sales) the hard age limits are fixed by Meta:
+ * the minimum may not be above 25 and the maximum is 65. A narrower range (here 28 to 65) goes in as a suggestion
+ * (age_range), which Meta may widen. Without Advantage+ the ages are hard limits.
+ */
+function targetingFor(v, advantage) {
+  const a = v.audience;
+  const base = { geo_locations: { countries: a.countries }, ...(a.placements === 'instagram' ? { publisher_platforms: ['instagram'] } : {}) };
+  if (!advantage) return { ...base, age_min: a.ageMin, age_max: a.ageMax, targeting_automation: { advantage_audience: 0 } };
+  return {
+    ...base,
+    age_min: Math.min(a.ageMin, 25),
+    age_max: 65,
+    ...(a.ageMin > 25 || a.ageMax < 65 ? { age_range: [a.ageMin, a.ageMax] } : {}),
+    targeting_automation: { advantage_audience: 1 }
+  };
+}
+
 async function runPush(id) {
   const created = {};
   try {
@@ -122,14 +140,7 @@ async function runPush(id) {
       throw new HttpError(502, `Meta stored the daily budget as ${back.daily_budget} instead of ${b.minor} (${fmtMoney(b.account, b.currency)}). Nothing was left at Meta.`);
     }
 
-    const targeting = {
-      geo_locations: { countries: v.audience.countries },
-      age_min: v.audience.ageMin,
-      age_max: v.audience.ageMax,
-      targeting_automation: { advantage_audience: 1 },
-      ...(v.audience.placements === 'instagram' ? { publisher_platforms: ['instagram'] } : {})
-    };
-    const adset = await graph('POST', `${accountId()}/adsets`, {
+    const adsetBody = (advantage) => ({
       name: v.name,
       campaign_id: campaign.id,
       status: 'PAUSED',
@@ -137,10 +148,21 @@ async function runPush(id) {
       optimization_goal: 'OFFSITE_CONVERSIONS',
       destination_type: 'WEBSITE',
       promoted_object: { pixel_id: cfg.pixelId, custom_event_type: metaEvent(v.optimizeFor) },
-      targeting,
+      targeting: targetingFor(v, advantage),
       start_time: `${v.startDate}T00:00:00+0800`,
       end_time: v.endDate ? `${v.endDate}T23:59:00+0800` : undefined
     });
+    // First with Advantage+ audience and the age as a suggestion. If Meta refuses that, with a manual audience and hard ages.
+    let adset;
+    let audienceMode = 'advantage_plus';
+    try {
+      adset = await graph('POST', `${accountId()}/adsets`, adsetBody(true));
+    } catch (e) {
+      if (!/advantage|age_range|age|audience|targeting/i.test(String(e.message))) throw e;
+      console.error('ad set with Advantage+ audience refused, retrying with a manual audience:', e.message);
+      adset = await graph('POST', `${accountId()}/adsets`, adsetBody(false));
+      audienceMode = 'manual';
+    }
     created.adsetId = adset.id;
 
     // The creative stays as approved: Meta's automatic enhancements are switched off. Older rules may not know the switch, then without it.
@@ -171,6 +193,7 @@ async function runPush(id) {
         creativeId: creative.id,
         adId: ad.id,
         instagramUserId: igUser,
+        audienceMode,
         pushedAt: new Date().toISOString(),
         budgetCurrency: b.currency,
         dailyBudgetAccount: b.account,
