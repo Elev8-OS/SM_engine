@@ -12,6 +12,12 @@ import { usdRates, toUsd, fromUsd, roundBudget, fmtMoney, PROPERTY_CURRENCY } fr
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const usd = (n) => `$${Number(n).toFixed(2)}`;
 const r2 = (x) => Math.round(x * 100) / 100;
+
+// The goals of the app and the names Meta wants in promoted_object.custom_event_type. They differ: Meta says
+// INITIATED_CHECKOUT and CONTENT_VIEW (answer of the Marketing API, error 100, November 2026).
+const META_EVENT = { INITIATE_CHECKOUT: 'INITIATED_CHECKOUT', PURCHASE: 'PURCHASE', VIEW_CONTENT: 'CONTENT_VIEW' };
+const metaEvent = (goal) => META_EVENT[goal] || goal;
+
 const row = async (id) => {
   const r = await q(`select *, to_char(end_date, 'YYYY-MM-DD') as end_day from ad_campaigns where id = $1`, [id]);
   if (!r.length) throw new HttpError(404, 'Ad not found');
@@ -130,7 +136,7 @@ async function runPush(id) {
       billing_event: 'IMPRESSIONS',
       optimization_goal: 'OFFSITE_CONVERSIONS',
       destination_type: 'WEBSITE',
-      promoted_object: { pixel_id: cfg.pixelId, custom_event_type: v.optimizeFor },
+      promoted_object: { pixel_id: cfg.pixelId, custom_event_type: metaEvent(v.optimizeFor) },
       targeting,
       start_time: `${v.startDate}T00:00:00+0800`,
       end_time: v.endDate ? `${v.endDate}T23:59:00+0800` : undefined
