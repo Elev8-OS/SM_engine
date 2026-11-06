@@ -89,24 +89,29 @@ export function productUrl(baseUrl, key) {
 const USABLE = new Set(['confirmed', 'elev8']);
 
 /**
- * Product text. When the fact sheet has a "catalog" list (short sentences written for guests, each one taken from the facts)
- * exactly those sentences are used. Without it the confirmed and Elev8 facts and what is NOT available are used. Facts that
- * are not confirmed (the open list) never go in. Without a sheet the highlights of the property are used.
+ * Product text, laid out to be read on a phone: the place, the price line, the features as a short list, the booking line.
+ * Blocks are separated by a blank line, the features by line breaks.
+ * When the fact sheet has a "catalog" list (short sentences written for guests, each one taken from the facts) exactly those
+ * sentences are used. Without it the confirmed and Elev8 facts and what is NOT available are used. Facts that are not
+ * confirmed (the open list) never go in. Without a sheet the highlights of the property are used.
  */
 export function describeVilla(prop, sheet, fromLine = '') {
   const intro = `${prop.name}${prop.area ? ` in ${prop.area}, Bali` : ' in Bali'}.`;
-  const parts = [];
-  if (fromLine) parts.push(fromLine);
+  const bullets = [];
   if (sheet && Array.isArray(sheet.catalog) && sheet.catalog.length) {
-    for (const t of sheet.catalog) if (t) parts.push(String(t).trim());
+    for (const t of sheet.catalog) if (t) bullets.push(String(t).trim());
   } else if (sheet) {
-    for (const x of sheet.facts || []) if (USABLE.has(x.status) && x.text) parts.push(String(x.text).trim());
-    for (const a of sheet.absent || []) if (a.text) parts.push(String(a.text).trim());
+    for (const x of sheet.facts || []) if (USABLE.has(x.status) && x.text) bullets.push(String(x.text).trim());
+    for (const a of sheet.absent || []) if (a.text) bullets.push(String(a.text).trim());
   } else {
-    if (prop.guests) parts.push(`Sleeps up to ${prop.guests} guests.`);
-    if (prop.highlights) parts.push(`${String(prop.highlights).replace(/\.$/, '')}.`);
+    if (prop.guests) bullets.push(`Sleeps up to ${prop.guests} guests.`);
+    if (prop.highlights) bullets.push(`${String(prop.highlights).replace(/\.$/, '')}.`);
   }
-  const text = [intro, ...parts, 'Book direct on elevate-villas.com.'].join(' ');
+  const blocks = [intro];
+  if (fromLine) blocks.push(fromLine);
+  if (bullets.length) blocks.push(bullets.map((b) => `\u2022 ${b}`).join('\n'));
+  blocks.push('Book direct on elevate-villas.com.');
+  const text = blocks.join('\n\n');
   return text.length > 4000 ? `${text.slice(0, 3990).replace(/\s+\S*$/, '')}.` : text;
 }
 
