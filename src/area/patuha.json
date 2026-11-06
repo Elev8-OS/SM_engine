@@ -1,0 +1,345 @@
+{
+  "key": "patuha",
+  "area": "Pererenan",
+  "updated": "2026-11-06",
+  "source": "Places and services research for The R Villa Patuha (Google Places and public sources, November 2026), 141 places checked for rating, review count and distance. Distances are calculated from the villa coordinates. Walking times of up to 11 minutes are estimated from the distance (about 5 km/h, route 30 per cent longer than the straight line) and are marked as estimates for the team to confirm. No prices, ratings or opening hours are stored on purpose: they change and must never appear in a post.",
+  "honest": [
+    "The sea at Pererenan Beach and Echo Beach is not for swimming: heavy shore break, strong currents, no lifeguards. Never write about swimming in the ocean. For swimming the guests have the villa pool, or a beach club pool.",
+    "The villa is not on the beach. Pererenan Beach and Echo Beach are about 2.5 km away, a short ride by scooter or Grab. They are good for sunset, a long walk and watching the surf.",
+    "The villa sits in a quiet residential area facing rice fields. Coffee, Thai food, a spa and a pharmacy are within a few minutes on foot. For everything else guests use a scooter, Grab or a driver. Never suggest walking after dark.",
+    "Pererenan is a working village with a cafe and wellness scene, not a resort strip with a promenade.",
+    "Opening hours, prices and ratings change. Never quote them."
+  ],
+  "seasons": [
+    "April to October is the dry season. May, June, September and October are the sweet spot: reliable sun, fewer crowds than July and August.",
+    "November to March is the wet season: usually a heavy afternoon downpour, not all-day rain. Lush green rice fields, fewer people, lower prices. January and February are the wettest months.",
+    "Nyepi (the Balinese day of silence) falls in early March 2027. The exact date is to be confirmed. The island stops for 24 hours. Do not promise anything for those days."
+  ],
+  "spots": [
+    {
+      "name": "WOHL Cafe",
+      "kind": "cafe",
+      "walkMin": 2,
+      "note": "work-friendly cafe, a desk at every seat",
+      "audience": [
+        "remote workers"
+      ]
+    },
+    {
+      "name": "Day by Day Coffee & Eatery",
+      "kind": "cafe",
+      "walkMin": 3,
+      "note": "small, good coffee and a sourdough breakfast",
+      "audience": [
+        "everyone",
+        "couples"
+      ]
+    },
+    {
+      "name": "Solace Spa Massage",
+      "kind": "spa",
+      "walkMin": 3,
+      "note": "Balinese and deep tissue massage",
+      "audience": [
+        "couples",
+        "wellness"
+      ]
+    },
+    {
+      "name": "Bird's Nest Thai Kitchen",
+      "kind": "restaurant",
+      "walkMin": 2,
+      "note": "authentic Thai, the closest dinner",
+      "audience": [
+        "everyone"
+      ]
+    },
+    {
+      "name": "sundaymood",
+      "kind": "recovery",
+      "walkMin": 5,
+      "note": "private infrared sauna and ice bath rooms, booked through an app",
+      "audience": [
+        "wellness",
+        "couples"
+      ]
+    },
+    {
+      "name": "Della Terra",
+      "kind": "restaurant",
+      "walkMin": 6,
+      "note": "intimate Italian with a menu that changes daily, best booked ahead",
+      "audience": [
+        "couples"
+      ]
+    },
+    {
+      "name": "KHAO Canggu",
+      "kind": "restaurant",
+      "walkMin": 6,
+      "note": "Thai in a big garden, dog friendly",
+      "audience": [
+        "everyone",
+        "groups"
+      ]
+    },
+    {
+      "name": "Paed Thai Canggu",
+      "kind": "restaurant",
+      "walkMin": 6,
+      "note": "elegant Thai, with a brunch menu too",
+      "audience": [
+        "couples"
+      ]
+    },
+    {
+      "name": "Kenji Ramen & Izakaya",
+      "kind": "restaurant",
+      "walkMin": 6,
+      "note": "ramen and izakaya skewers",
+      "audience": [
+        "everyone"
+      ]
+    },
+    {
+      "name": "Warung Babi Guling Swari",
+      "kind": "warung",
+      "walkMin": 6,
+      "note": "family-run Balinese roast pork, simple and local",
+      "audience": [
+        "everyone"
+      ]
+    },
+    {
+      "name": "Shortcut Cafe",
+      "kind": "cafe",
+      "walkMin": 8,
+      "note": "build-your-own breakfast plate, vegan friendly",
+      "audience": [
+        "everyone"
+      ]
+    },
+    {
+      "name": "nude cafe Pererenan",
+      "kind": "cafe",
+      "walkMin": 8,
+      "note": "easy breakfast with a kids menu and parking",
+      "audience": [
+        "families"
+      ]
+    },
+    {
+      "name": "Mission Flow Studio",
+      "kind": "yoga",
+      "walkMin": 8,
+      "note": "yoga studio with a cafe downstairs",
+      "audience": [
+        "wellness"
+      ]
+    },
+    {
+      "name": "Taco Madre",
+      "kind": "restaurant",
+      "walkMin": 9,
+      "note": "small taco spot with vegan options",
+      "audience": [
+        "everyone"
+      ]
+    },
+    {
+      "name": "TYM Sea Food",
+      "kind": "restaurant",
+      "walkMin": 9,
+      "note": "pick your fish and have it grilled, simple setting",
+      "audience": [
+        "groups",
+        "everyone"
+      ]
+    },
+    {
+      "name": "Nostimo Greek",
+      "kind": "restaurant",
+      "walkMin": 11,
+      "note": "Greek grill with a kids menu, on a busy street",
+      "audience": [
+        "families"
+      ]
+    },
+    {
+      "name": "ACME Pererenan",
+      "kind": "cafe",
+      "distanceKm": 1.0,
+      "note": "bakery and coffee roastery",
+      "audience": [
+        "everyone",
+        "couples"
+      ]
+    },
+    {
+      "name": "Warung Yess",
+      "kind": "warung",
+      "distanceKm": 1.1,
+      "note": "buffet-style warung in a family home",
+      "audience": [
+        "everyone"
+      ]
+    },
+    {
+      "name": "Chandra Yoga",
+      "kind": "yoga",
+      "distanceKm": 1.2,
+      "note": "riverside gazebo by the rice fields",
+      "audience": [
+        "wellness"
+      ]
+    },
+    {
+      "name": "Warung Apa?",
+      "kind": "warung",
+      "distanceKm": 1.5,
+      "note": "smaller, home-style nasi campur",
+      "audience": [
+        "everyone"
+      ]
+    },
+    {
+      "name": "Brunch Club Pererenan",
+      "kind": "cafe",
+      "distanceKm": 1.6,
+      "note": "big, busy brunch place",
+      "audience": [
+        "families",
+        "groups"
+      ]
+    },
+    {
+      "name": "Warung Sika",
+      "kind": "warung",
+      "distanceKm": 1.7,
+      "note": "popular nasi campur warung",
+      "audience": [
+        "everyone"
+      ]
+    },
+    {
+      "name": "Pescado Pererenan",
+      "kind": "restaurant",
+      "distanceKm": 1.7,
+      "note": "Spanish seafood, known for paella",
+      "audience": [
+        "couples",
+        "groups"
+      ]
+    },
+    {
+      "name": "Riviera Trattoria Pererenan",
+      "kind": "restaurant",
+      "distanceKm": 2.0,
+      "note": "upscale Italian trattoria",
+      "audience": [
+        "couples",
+        "groups"
+      ]
+    },
+    {
+      "name": "La Brisa Bali",
+      "kind": "beach club",
+      "distanceKm": 2.4,
+      "note": "beach club built from reclaimed fishing boats, with pool, food and sunset",
+      "audience": [
+        "couples",
+        "groups"
+      ]
+    },
+    {
+      "name": "Pererenan Beach",
+      "kind": "beach",
+      "distanceKm": 2.5,
+      "note": "black sand, sunset and a long walk. Not for swimming.",
+      "audience": [
+        "couples",
+        "everyone"
+      ]
+    },
+    {
+      "name": "Echo Beach",
+      "kind": "beach",
+      "distanceKm": 2.5,
+      "note": "sunset with the surfers in the water. Not for swimming.",
+      "audience": [
+        "everyone",
+        "surfers"
+      ]
+    },
+    {
+      "name": "Hippie Fish",
+      "kind": "restaurant",
+      "distanceKm": 2.5,
+      "note": "seafood on Pererenan Beach, the obvious sunset dinner",
+      "audience": [
+        "couples"
+      ]
+    },
+    {
+      "name": "Othree Beach Bar",
+      "kind": "beach bar",
+      "distanceKm": 2.5,
+      "note": "casual beach bar at Echo Beach",
+      "audience": [
+        "couples",
+        "groups"
+      ]
+    },
+    {
+      "name": "Surfers Surf Lesson",
+      "kind": "surf",
+      "distanceKm": 2.5,
+      "note": "beginner surf lessons at Pererenan and Echo Beach",
+      "audience": [
+        "surfers",
+        "families"
+      ]
+    },
+    {
+      "name": "Tanah Lot",
+      "kind": "sight",
+      "distanceKm": 6,
+      "note": "the sea temple, the closest major sight. Best early in the morning or at sunset.",
+      "audience": [
+        "everyone"
+      ]
+    }
+  ],
+  "practical": [
+    {
+      "name": "ApotekKu Pererenan",
+      "kind": "pharmacy",
+      "walkMin": 5,
+      "note": "24 hours"
+    },
+    {
+      "name": "Fantasy Supermarket",
+      "kind": "supermarket",
+      "walkMin": 5,
+      "note": "groceries and household items"
+    },
+    {
+      "name": "Frestive Supermarket",
+      "kind": "supermarket",
+      "walkMin": 8,
+      "note": "bakery and a larger range"
+    },
+    {
+      "name": "The Medical Canggu Batu Bolong",
+      "kind": "clinic",
+      "distanceKm": 1.1,
+      "note": "24 hours, house calls possible"
+    },
+    {
+      "name": "BaliMed Canggu Clinic",
+      "kind": "clinic",
+      "distanceKm": 1.2,
+      "note": "24 hours"
+    }
+  ]
+}
