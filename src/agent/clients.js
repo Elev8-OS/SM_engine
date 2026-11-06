@@ -89,6 +89,20 @@ export async function pricelabsRows(listingId, dateFrom, dateTo) {
   return { currency: item?.currency || '', rows: item?.data || [] };
 }
 
+/** Base price of a PriceLabs listing (the base in the listing settings) and its currency. */
+export async function pricelabsBase(listingId) {
+  const key = process.env.PRICELABS_API_KEY;
+  if (!key) throw new Error('PRICELABS_API_KEY is not set');
+  const res = await fetch(`https://api.pricelabs.co/v1/listings/${encodeURIComponent(listingId)}?pms=channex`, {
+    headers: { 'X-API-Key': key, Accept: 'application/json' },
+    signal: AbortSignal.timeout(30000)
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(`PriceLabs ${res.status}: ${JSON.stringify(json).slice(0, 200)}`);
+  const item = Array.isArray(json?.listings) ? json.listings[0] : Array.isArray(json) ? json[0] : json;
+  return { base: Number(item?.base) || 0, currency: String(item?.currency || '').toUpperCase() };
+}
+
 // ---- GHL conversations (Instagram DMs) ----
 const ghlHeaders = () => ({ Authorization: `Bearer ${process.env.GHL_API_TOKEN}`, Version: '2021-04-15', 'Content-Type': 'application/json', Accept: 'application/json' });
 

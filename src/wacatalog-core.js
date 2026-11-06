@@ -32,6 +32,21 @@ export function lowestNightly(rows, blocked, fromIso, days) {
   return { min, freeNights: free, pricedNights: priced };
 }
 
+/**
+ * The nights on which EVERY unit is blocked, as one-night ranges. A product that stands for several units (an apartment
+ * category, the rooms of a shared villa) is sold out only when no unit can be booked. unitRanges: one list of
+ * {start, end_exclusive} per unit.
+ */
+export function allBlockedRanges(unitRanges, fromIso, days) {
+  if (!Array.isArray(unitRanges) || !unitRanges.length) return [];
+  const out = [];
+  for (const d of nightList(fromIso, days)) {
+    const next = new Date(Date.parse(`${d}T00:00:00Z`) + DAY).toISOString().slice(0, 10);
+    if (unitRanges.every((ranges) => (ranges || []).some((b) => d >= b.start && d < b.end_exclusive))) out.push({ start: d, end_exclusive: next });
+  }
+  return out;
+}
+
 const ZERO_DECIMAL = new Set(['IDR', 'JPY', 'KRW', 'VND', 'CLP', 'HUF']);
 // Rounding step for a "from" price: a clean number a guest can read (2,380,000 rather than 2,376,412).
 const STEP = { IDR: 10000, VND: 10000, KRW: 1000, JPY: 100, CLP: 1000, HUF: 100 };
