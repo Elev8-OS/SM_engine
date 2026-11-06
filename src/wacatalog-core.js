@@ -110,24 +110,35 @@ export function describeVilla(prop, sheet, fromLine = '') {
   return text.length > 4000 ? `${text.slice(0, 3990).replace(/\s+\S*$/, '')}.` : text;
 }
 
+// The apartment categories: one Elev8 id holds the photos of several galleries (a folder per gallery, each numbered from 1).
+// For these the gallery of the website page is used, so the catalog shows the same photos as the booking page.
+// key: the Elev8 id of the category, value: the photo folder that the website page of the category shows.
+const PREFERRED_FOLDER = {
+  '49f64992-d0c0-4566-9edf-fe7ce185f36b': '266e5503-d7fb-4349-9959-f01f03f1d290', // The R Apartments Studio
+  '15a053e0-d4b8-491f-ae5b-fefcda8f8493': '42b7110f-8164-4052-8fde-847de20f6965', // Mezzanine with balcony
+  '1ed9c430-09bd-497e-816f-ca5837296b3f': '5d711329-c94e-4480-96ed-9c37cee35fed' // Mezzanine with plunge pool
+};
+const folderOf = (url) => /\/listing\/([0-9a-f-]{36})\//i.exec(String(url))?.[1] || '';
+
 /**
  * Images of an Elev8 listing in gallery order, as public URLs, at most max.
- * One listing id can hold the galleries of several listings (the apartment categories). Each gallery numbers its photos from 1,
- * so sorting everything together mixes the galleries. The gallery of the listing that comes first is used; a very short one
- * (fewer than 4 photos) gives way to the longest.
+ * One listing id can hold the galleries of several folders. Each gallery numbers its photos from 1, so sorting everything
+ * together mixes them. A category with a known website gallery uses that folder. Otherwise the folder of the first photo is used;
+ * a very short one (fewer than 4 photos) gives way to the longest.
  */
 export function galleryUrls(results, max = 10) {
   const usable = (results || []).filter((x) => x && typeof x.image_url === 'string' && /^https:\/\//.test(x.image_url));
-  const groups = new Map();
+  const byFolder = new Map();
   for (const x of usable) {
-    const k = String(x.listing_name || '');
-    if (!groups.has(k)) groups.set(k, []);
-    groups.get(k).push(x);
+    const k = folderOf(x.image_url);
+    if (!byFolder.has(k)) byFolder.set(k, []);
+    byFolder.get(k).push(x);
   }
-  const all = [...groups.values()];
-  let chosen = all[0] || [];
-  if (chosen.length < 4) {
-    const longest = [...all].sort((a, b) => b.length - a.length)[0];
+  const folders = [...byFolder.entries()];
+  const preferred = PREFERRED_FOLDER[usable[0]?.listing_id];
+  let chosen = (preferred && byFolder.get(preferred)) || folders[0]?.[1] || [];
+  if (!(preferred && byFolder.get(preferred)) && chosen.length < 4) {
+    const longest = folders.map(([, v]) => v).sort((a, b) => b.length - a.length)[0];
     if (longest && longest.length > chosen.length) chosen = longest;
   }
   const seen = new Set();
