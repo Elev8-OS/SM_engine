@@ -21,6 +21,7 @@ import { brandRoutes } from './brand.js';
 import { adsRoutes } from './ads.js';
 import { adsLiveRoutes, startAdsMonitor } from './ads-live.js';
 import { outreachRoutes } from './outreach.js';
+import { waCatalogRoutes, startWaCatalogSync } from './wacatalog.js';
 
 const app = express();
 app.use(express.json({ limit: '60mb' }));
@@ -223,6 +224,7 @@ brandRoutes(app, ah);
 adsRoutes(app, needDb, ah);
 adsLiveRoutes(app, needDb, ah);
 outreachRoutes(app, ah);
+waCatalogRoutes(app, needDb, ah);
 
 app.use((err, _req, res, _next) => {
   if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
@@ -237,3 +239,4 @@ if (dbEnabled()) {
 const port = Number(process.env.PORT) || 3000;
 app.listen(port, () => console.log(`SM_engine listening on ${port}`));
 startAdsMonitor();
+startWaCatalogSync();
