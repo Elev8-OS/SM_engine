@@ -52,7 +52,7 @@ export async function auditAd(id) {
   const since = now - 7 * 86400;
   const stat = (aggregation) => graph('GET', `${cfg.pixelId}/stats`, { aggregation, start_time: since, end_time: now });
 
-  const [campR, setR, adR, crR, igR, pxR, insR, accR, px, sEvents, sPii, sMethod, sHost] = await Promise.all([
+  const [campR, setR, adR, crR, igR, pxR, insR, accR, px, sEvents, sValue, sMethod, sHost] = await Promise.all([
     attempt(() => read(m.campaignId, 'name,objective,status,effective_status,daily_budget,bid_strategy,buying_type,special_ad_categories')),
     attempt(() => read(m.adsetId, 'name,status,effective_status,optimization_goal,billing_event,destination_type,promoted_object,targeting,attribution_spec,start_time,end_time,learning_stage_info,issues_info')),
     attempt(() => read(m.adId, 'name,status,effective_status,configured_status,issues_info,ad_review_feedback,tracking_specs,conversion_domain')),
@@ -63,13 +63,13 @@ export async function auditAd(id) {
     attempt(() => read(accountId(), 'account_status,disable_reason,currency,spend_cap,amount_spent,timezone_name')),
     attempt(() => pixelStatus()),
     attempt(() => stat('event_total_counts')),
-    attempt(() => stat('pii_keys')),
+    attempt(() => stat('event_value_count')),
     attempt(() => stat('event_detection_method')),
     attempt(() => stat('host'))
   ]);
 
   const unread = {};
-  for (const [k, r] of Object.entries({ campaign: campR, adset: setR, ad: adR, creative: crR, instagram: igR, pixel: pxR, insights: insR, account: accR, pixelEvents: px, statEvents: sEvents, statPii: sPii, statMethod: sMethod, statHost: sHost })) if (!r.ok) unread[k] = r.error;
+  for (const [k, r] of Object.entries({ campaign: campR, adset: setR, ad: adR, creative: crR, instagram: igR, pixel: pxR, insights: insR, account: accR, pixelEvents: px, statEvents: sEvents, statValue: sValue, statMethod: sMethod, statHost: sHost })) if (!r.ok) unread[k] = r.error;
 
   const camp = campR.data || {};
   const adset = setR.data || {};
@@ -79,22 +79,22 @@ export async function auditAd(id) {
   const ins = insR.data?.data?.[0] || {};
   const cur = acct.currency;
   const checks = [];
-  const add = (level, area, key, text, fix = '') => checks.push({ level, area, key, text, fix });
+  const add = (level, area, key, text, fix = '', params = {}) => checks.push({ level, area, key, text, fix, params });
 
   // ---- Delivery and review
   if (adR.ok) {
     const issues = (ad.issues_info || []).map((i) => i.error_summary || i.error_message).filter(Boolean);
-    if (issues.length) add('block', 'setup', 'ad_issues', `Meta reports problems with the ad: ${issues.join('; ')}`, 'Open the ad in Ads Manager and fix what Meta names.');
-    else add('ok', 'setup', 'ad_status', `Ad status at Meta: ${ad.effective_status}`);
+    if (issues.length) add('block', 'setup', 'ad_issues', `Meta reports problems with the ad: ${issues.join('; ')}`, 'Open the ad in Ads Manager and fix what Meta names.', { issues: issues.join('; ') });
+    else add('ok', 'setup', 'ad_status', `Ad status at Meta: ${ad.effective_status}`, '', { status: ad.effective_status });
   }
-  if (accR.ok && accR.data.account_status !== undefined && Number(accR.data.account_status) !== 1) add('block', 'setup', 'account_status', `The ad account is not active (status ${accR.data.account_status}, reason ${accR.data.disable_reason ?? 'unknown'}).`, 'Check the account in Business Settings.');
+  if (accR.ok && accR.data.account_status !== undefined && Number(accR.data.account_status) !== 1) add('block', 'setup', 'account_status', `The ad account is not active (status ${accR.data.account_status}, reason ${accR.data.disable_reason ?? 'unknown'}).`, 'Check the account in Business Settings.', { status: accR.data.account_status, reason: accR.data.disable_reason ?? null });
 
   // ---- Budget as Meta stored it
   if (campR.ok && camp.daily_budget) {
     const seen = Number(camp.daily_budget) / acct.offset;
     const planned = num(m.dailyBudgetAccount);
-    if (planned && Math.abs(seen / planned - 1) > 0.01) add('block', 'setup', 'budget', `Daily budget at Meta is ${fmtMoney(seen, cur)}, planned was ${fmtMoney(planned, cur)}.`, 'The amount unit of the currency is probably wrong. Do not switch the ad on, check META_CURRENCY_OFFSET.');
-    else add('ok', 'setup', 'budget', `Daily budget at Meta: ${fmtMoney(seen, cur)}${planned ? ' (as planned)' : ''}. Per week about ${fmtMoney(seen * 7, cur)}.`);
+    if (planned && Math.abs(seen / planned - 1) > 0.01) add('block', 'setup', 'budget', `Daily budget at Meta is ${fmtMoney(seen, cur)}, planned was ${fmtMoney(planned, cur)}.`, 'The amount unit of the currency is probably wrong. Do not switch the ad on, check META_CURRENCY_OFFSET.', { seen, planned, currency: cur });
+    else add('ok', 'setup', 'budget', `Daily budget at Meta: ${fmtMoney(seen, cur)}${planned ? ' (as planned)' : ''}. Per week about ${fmtMoney(seen * 7, cur)}.`, '', { seen, planned, currency: cur, week: seen * 7 });
   }
 
   // ---- Optimisation and learning
@@ -102,21 +102,21 @@ export async function auditAd(id) {
     const goal = adset.promoted_object?.custom_event_type;
     const pixelName = PIXEL_EVENT[goal] || goal;
     const weekly = px.ok ? Number(px.data.events?.[pixelName]) || 0 : null;
-    add('info', 'conversion', 'optimisation', `Optimised for ${goal || adset.optimization_goal} on the website (${adset.optimization_goal}, billed per ${adset.billing_event}).`);
+    add('info', 'conversion', 'optimisation', `Optimised for ${goal || adset.optimization_goal} on the website (${adset.optimization_goal}, billed per ${adset.billing_event}).`, '', { goal: goal || null, optimizationGoal: adset.optimization_goal, billing: adset.billing_event });
     if (weekly !== null) {
-      if (weekly < 50) add('warn', 'conversion', 'event_volume', `The pixel saw ${weekly} ${pixelName} events in 7 days across the whole site. Meta wants about 50 optimisation events per week for this one ad set to leave the learning phase.`, 'With a small budget optimise for an event further up the funnel for the first weeks, then move down.');
-      else add('ok', 'conversion', 'event_volume', `The pixel saw ${weekly} ${pixelName} events in 7 days.`);
+      if (weekly < 50) add('warn', 'conversion', 'event_volume', `The pixel saw ${weekly} ${pixelName} events in 7 days across the whole site. Meta wants about 50 optimisation events per week for this one ad set to leave the learning phase.`, 'With a small budget optimise for an event further up the funnel for the first weeks, then move down.', { count: weekly, event: pixelName });
+      else add('ok', 'conversion', 'event_volume', `The pixel saw ${weekly} ${pixelName} events in 7 days.`, '', { count: weekly, event: pixelName });
     }
     const ls = adset.learning_stage_info;
-    if (ls?.status) add(ls.status === 'FAIL' ? 'warn' : 'info', 'conversion', 'learning', `Learning phase: ${ls.status}${ls.conversions !== undefined ? ` (${ls.conversions} conversions so far)` : ''}.`, ls.status === 'FAIL' ? 'Learning limited: too few conversions for the budget. Raise the budget or move the goal up the funnel.' : '');
+    if (ls?.status) add(ls.status === 'FAIL' ? 'warn' : 'info', 'conversion', 'learning', `Learning phase: ${ls.status}${ls.conversions !== undefined ? ` (${ls.conversions} conversions so far)` : ''}.`, ls.status === 'FAIL' ? 'Learning limited: too few conversions for the budget. Raise the budget or move the goal up the funnel.' : '', { status: ls.status, conversions: ls.conversions ?? null });
     const win = (adset.attribution_spec || []).map((a) => `${a.window_days} day ${String(a.event_type).replace('_THROUGH', '').toLowerCase()}`).join(', ');
-    if (win) add('info', 'tracking', 'attribution', `Attribution window: ${win}. Villa bookings often take longer to decide than this, so only your own data (source stored with the booking) shows the whole picture.`);
+    if (win) add('info', 'tracking', 'attribution', `Attribution window: ${win}. Villa bookings often take longer to decide than this, so only your own data (source stored with the booking) shows the whole picture.`, '', { windows: (adset.attribution_spec || []).map((a) => ({ type: a.event_type, days: a.window_days })) });
     const t = adset.targeting || {};
     const countries = t.geo_locations?.countries || [];
-    add('info', 'conversion', 'audience', `Countries: ${countries.join(', ') || 'none named'}; age ${t.age_min ?? '?'} to ${t.age_max ?? '?'}${t.age_range ? ` (suggestion ${t.age_range.join(' to ')})` : ''}; Advantage+ audience ${t.targeting_automation?.advantage_audience === 1 ? 'on' : 'off'}; placements ${t.publisher_platforms ? t.publisher_platforms.join(', ') : 'automatic'}.`);
+    add('info', 'conversion', 'audience', `Countries: ${countries.join(', ') || 'none named'}; age ${t.age_min ?? '?'} to ${t.age_max ?? '?'}${t.age_range ? ` (suggestion ${t.age_range.join(' to ')})` : ''}; Advantage+ audience ${t.targeting_automation?.advantage_audience === 1 ? 'on' : 'off'}; placements ${t.publisher_platforms ? t.publisher_platforms.join(', ') : 'automatic'}.`, '', { countries, ageMin: t.age_min ?? null, ageMax: t.age_max ?? null, ageRange: t.age_range ?? null, advantage: t.targeting_automation?.advantage_audience === 1, placements: t.publisher_platforms || null });
     const hasSignal = (t.custom_audiences || []).length > 0 || (t.flexible_spec || []).length > 0;
-    if (!hasSignal) add('warn', 'conversion', 'no_audience_signal', 'No custom audience or interest is given as a signal. Meta starts from nothing and has to find the buyers itself.', 'Add website visitors and a list of past guests as audience signals. Later add a lookalike of past guests.');
-    if (!(adset.end_time)) add('info', 'setup', 'end_time', 'The ad set has no end date.');
+    if (!hasSignal) add('warn', 'conversion', 'no_audience_signal', 'No custom audience or interest is given as a signal. Meta starts from nothing and has to find the buyers itself.', 'Add website visitors and a list of past guests as audience signals. Later add a lookalike of past guests.', {});
+    if (!(adset.end_time)) add('info', 'setup', 'end_time', 'The ad set has no end date.', '', {});
   }
 
   // ---- Creative and links
@@ -124,48 +124,59 @@ export async function auditAd(id) {
     const spec = cr.object_story_spec || {};
     const links = [spec.link_data?.link, ...((spec.link_data?.child_attachments || []).map((c) => c.link)), spec.video_data?.call_to_action?.value?.link].filter(Boolean);
     const utmInLink = links.length > 0 && links.every((l) => /utm_source=/i.test(l));
-    if (cr.url_tags || utmInLink) add('ok', 'tracking', 'utm', `URL parameters are set (${cr.url_tags || 'in the link'}).`);
-    else add('warn', 'tracking', 'utm', 'The ad has no UTM parameters. Visits and bookings cannot be tied to this ad in your own data.', 'Set URL parameters on the ad: utm_source=facebook&utm_medium=paid_social&utm_campaign={{campaign.name}}&utm_content={{ad.name}} and store them with the booking.');
+    if (cr.url_tags || utmInLink) add('ok', 'tracking', 'utm', `URL parameters are set (${cr.url_tags || 'in the link'}).`, '', { tags: cr.url_tags || null });
+    else add('warn', 'tracking', 'utm', 'The ad has no UTM parameters. Visits and bookings cannot be tied to this ad in your own data.', 'Set URL parameters on the ad: utm_source=facebook&utm_medium=paid_social&utm_campaign={{campaign.name}}&utm_content={{ad.name}} and store them with the booking.', {});
     const ig = spec.instagram_user_id || spec.instagram_actor_id || cr.instagram_actor_id;
     if (!ig) {
       const accounts = igR.ok ? (igR.data.data || []).map((a) => a.username).filter(Boolean) : [];
-      add('warn', 'conversion', 'instagram_identity', `The ad runs under the Facebook page only, without an Instagram account${accounts.length ? ` (the ad account offers: ${accounts.join(', ')})` : ' (the ad account has no Instagram account assigned)'}.`, 'Pick the Instagram account in the ad (Identity). In Business Settings assign it to the ad account so the app finds it next time.');
-    } else add('ok', 'conversion', 'instagram_identity', 'The ad runs with the Instagram account.');
+      add('warn', 'conversion', 'instagram_identity', `The ad runs under the Facebook page only, without an Instagram account${accounts.length ? ` (the ad account offers: ${accounts.join(', ')})` : ' (the ad account has no Instagram account assigned)'}.`, 'Pick the Instagram account in the ad (Identity). In Business Settings assign it to the ad account so the app finds it next time.', { accounts });
+    } else add('ok', 'conversion', 'instagram_identity', 'The ad runs with the Instagram account.', '', {});
     const ctas = (spec.link_data?.child_attachments || []).map((c) => c.call_to_action?.type).filter(Boolean);
     const cta = spec.video_data?.call_to_action?.type || spec.link_data?.call_to_action?.type;
-    add(ctas.length || cta ? 'ok' : 'warn', 'conversion', 'cta', ctas.length ? `Button on each card: ${[...new Set(ctas)].join(', ')}.` : cta ? `Button: ${cta}.` : 'No call-to-action button found.');
+    add(ctas.length || cta ? 'ok' : 'warn', 'conversion', 'cta', ctas.length ? `Button on each card: ${[...new Set(ctas)].join(', ')}.` : cta ? `Button: ${cta}.` : 'No call-to-action button found.', '', { types: [...new Set(ctas)], single: cta || null });
     const enh = cr.degrees_of_freedom_spec?.creative_features_spec?.standard_enhancements?.enroll_status;
-    add('info', 'conversion', 'enhancements', `Meta's automatic enhancements of the creative: ${enh === 'OPT_OUT' ? 'off' : enh || 'default'}. Consider testing them on one variant.`);
-    if ((spec.link_data?.child_attachments || []).length === 0 && !spec.video_data) add('info', 'conversion', 'format', 'Single image ad. A carousel and a video usually give Meta more to learn from.');
+    add('info', 'conversion', 'enhancements', `Meta's automatic enhancements of the creative: ${enh === 'OPT_OUT' ? 'off' : enh || 'default'}. Consider testing them on one variant.`, '', { state: enh === 'OPT_OUT' ? 'off' : enh || 'default' });
+    if ((spec.link_data?.child_attachments || []).length === 0 && !spec.video_data) add('info', 'conversion', 'format', 'Single image ad. A carousel and a video usually give Meta more to learn from.', '', {});
   }
 
   // ---- Pixel and events
   if (pxR.ok) {
     const last = pixel.last_fired_time ? Date.parse(pixel.last_fired_time) : null;
-    if (pixel.is_unavailable) add('block', 'tracking', 'pixel_unavailable', 'The pixel is marked unavailable.', 'Check the pixel in Events Manager.');
-    else if (last && Date.now() - last > 24 * 3600 * 1000) add('warn', 'tracking', 'pixel_fresh', `The pixel last fired ${new Date(last).toISOString()}.`, 'Check that the code is still on the site.');
-    else if (last) add('ok', 'tracking', 'pixel_fresh', `The pixel fired recently (${new Date(last).toISOString()}).`);
-    if (pixel.enable_automatic_matching === false) add('warn', 'tracking', 'automatic_matching', 'Automatic advanced matching is off. Meta gets no email or phone hash from the browser.', 'Switch it on in Events Manager (Settings) or send the hashes with the events.');
-    if (pixel.first_party_cookie_status && !/ENABLED/i.test(pixel.first_party_cookie_status)) add('warn', 'tracking', 'first_party_cookie', `First-party cookie setting: ${pixel.first_party_cookie_status}.`, 'Switch the first-party cookie on in Events Manager.');
+    if (pixel.is_unavailable) add('block', 'tracking', 'pixel_unavailable', 'The pixel is marked unavailable.', 'Check the pixel in Events Manager.', {});
+    else if (last && Date.now() - last > 24 * 3600 * 1000) add('warn', 'tracking', 'pixel_fresh', `The pixel last fired ${new Date(last).toISOString()}.`, 'Check that the code is still on the site.', { at: new Date(last).toISOString() });
+    else if (last) add('ok', 'tracking', 'pixel_fresh', `The pixel fired recently (${new Date(last).toISOString()}).`, '', { at: new Date(last).toISOString() });
+    if (pixel.enable_automatic_matching === false) add('warn', 'tracking', 'automatic_matching', 'Automatic advanced matching is off. Meta gets no email or phone hash from the browser.', 'Switch it on in Events Manager (Settings) or send the hashes with the events.', {});
+    if (pixel.first_party_cookie_status && !/ENABLED/i.test(pixel.first_party_cookie_status)) add('warn', 'tracking', 'first_party_cookie', `First-party cookie setting: ${pixel.first_party_cookie_status}.`, 'Switch the first-party cookie on in Events Manager.', { status: pixel.first_party_cookie_status });
   }
   if (px.ok) {
     const e = px.data.events || {};
     const line = ['PageView', 'ViewContent', 'InitiateCheckout', 'AddPaymentInfo', 'Purchase'].map((k) => `${k} ${e[k] || 0}`).join(', ');
-    add('info', 'tracking', 'events', `Events in the last 7 days: ${line}.`);
-    if (!e.ViewContent) add('warn', 'tracking', 'no_viewcontent', 'No ViewContent event: the villa pages are not reported as product views.', 'Send ViewContent on each villa page with content_ids (villa-patuha and so on) and value.');
-    if (!e.AddPaymentInfo) add('info', 'tracking', 'no_paymentinfo', 'No AddPaymentInfo event. One more step in the funnel would show where guests drop out.');
-    if (!e.Purchase) add('warn', 'tracking', 'no_purchase', 'No Purchase event yet in 7 days.', 'Send every direct booking from Elev8 as a Purchase through the Conversions API (hashed email and phone, value, currency, event_id), also those that do not come through the website.');
+    add('info', 'tracking', 'events', `Events in the last 7 days: ${line}.`, '', { PageView: e.PageView || 0, ViewContent: e.ViewContent || 0, InitiateCheckout: e.InitiateCheckout || 0, AddPaymentInfo: e.AddPaymentInfo || 0, Purchase: e.Purchase || 0 });
+    const pc = (a, b) => (b ? Math.round((a / b) * 100) : null);
+    add('info', 'conversion', 'funnel', `Funnel over 7 days: ${e.PageView || 0} page views, ${pc(e.ViewContent || 0, e.PageView || 0) ?? 0} per cent of them see a villa (${e.ViewContent || 0}), ${pc(e.InitiateCheckout || 0, e.ViewContent || 0) ?? 0} per cent of those start a checkout (${e.InitiateCheckout || 0}).`, '', { pageView: e.PageView || 0, viewContent: e.ViewContent || 0, initiateCheckout: e.InitiateCheckout || 0, pvToVc: pc(e.ViewContent || 0, e.PageView || 0), vcToIc: pc(e.InitiateCheckout || 0, e.ViewContent || 0) });
+    if (!e.ViewContent) add('warn', 'tracking', 'no_viewcontent', 'No ViewContent event: the villa pages are not reported as product views.', 'Send ViewContent on each villa page with content_ids (villa-patuha and so on) and value.', {});
+    if (!e.AddPaymentInfo) add('info', 'tracking', 'no_paymentinfo', 'No AddPaymentInfo event. One more step in the funnel would show where guests drop out.', '', {});
+    if (!e.Purchase) add('warn', 'tracking', 'no_purchase', 'No Purchase event yet in 7 days.', 'Send every direct booking from Elev8 as a Purchase through the Conversions API (hashed email and phone, value, currency, event_id), also those that do not come through the website.', {});
   }
-  if (sPii.ok) {
-    const keys = Object.keys(statValues(sPii.data));
-    const has = (k) => keys.includes(k);
-    if (keys.length === 0) add('warn', 'tracking', 'match_keys', 'No customer information (email, phone) arrives with the events. The match quality is low and Meta finds fewer of the buyers.', 'Send hashed email and phone at checkout and with the Purchase, plus fbp and fbc.');
-    else add(has('em') && has('ph') ? 'ok' : 'warn', 'tracking', 'match_keys', `Customer information keys seen in 7 days: ${keys.join(', ')}.`, has('em') && has('ph') ? '' : 'Send hashed email and phone as well.');
+  if (sValue.ok) {
+    const withValue = statValues(sValue.data);
+    if (Object.keys(withValue).length) add('info', 'tracking', 'value_events', `Events that carry a value: ${Object.entries(withValue).map(([k, n]) => `${k} ${n}`).join(', ')}.`, '', { events: withValue });
+  }
+  if (sHost.ok) {
+    let mine = '';
+    try {
+      mine = new URL(v.creative.url).host.replace(/^www\./, '');
+    } catch {
+      mine = '';
+    }
+    const hosts = statValues(sHost.data);
+    const other = Object.fromEntries(Object.entries(hosts).filter(([h]) => mine && !h.replace(/^www\./, '').endsWith(mine)));
+    if (Object.keys(other).length) add('info', 'tracking', 'hosts', `Events also came from other addresses: ${Object.entries(other).map(([k, n]) => `${k} ${n}`).join(', ')}.`, '', { hosts: other, own: mine });
   }
   if (sMethod.ok) {
     const keys = Object.keys(statValues(sMethod.data));
     const server = keys.some((k) => /server|api|capi/i.test(k));
-    add(server ? 'ok' : 'warn', 'tracking', 'server_events', `Events by source in 7 days: ${keys.join(', ') || 'none'}.`, server ? '' : 'No server-side event seen yet. The Purchase through the Conversions API should show up here once a booking is made.');
+    add(server ? 'ok' : 'warn', 'tracking', 'server_events', `Events by source in 7 days: ${keys.join(', ') || 'none'}.`, server ? '' : 'No server-side event seen yet. The Purchase through the Conversions API should show up here once a booking is made.', { sources: keys });
   }
 
   // ---- What the ad has done so far
@@ -177,7 +188,7 @@ export async function auditAd(id) {
     const purchases = actionCount(ins.actions, ['omni_purchase', 'offsite_conversion.fb_pixel_purchase']);
     const linkClicks = num(ins.inline_link_clicks) || actionCount(ins.actions, ['link_click']);
     summary = { spend, currency: cur, impressions: num(ins.impressions), reach: num(ins.reach), frequency: num(ins.frequency), clicks: num(ins.clicks), linkClicks, ctr: num(ins.ctr), cpc: num(ins.cpc), cpm: num(ins.cpm), landingPageViews: lpv, checkouts, purchases, costPerLandingPageView: lpv ? Math.round((spend / lpv) * 100) / 100 : null, costPerCheckout: checkouts ? Math.round((spend / checkouts) * 100) / 100 : null };
-    if (linkClicks >= 30 && lpv / linkClicks < 0.6) add('warn', 'conversion', 'lpv_ratio', `Only ${Math.round((lpv / linkClicks) * 100)} per cent of the link clicks become landing page views. The page loads too slowly or the pixel fires late.`, 'Check the mobile loading time of the landing page.');
+    if (linkClicks >= 30 && lpv / linkClicks < 0.6) add('warn', 'conversion', 'lpv_ratio', `Only ${Math.round((lpv / linkClicks) * 100)} per cent of the link clicks become landing page views. The page loads too slowly or the pixel fires late.`, 'Check the mobile loading time of the landing page.', { pct: Math.round((lpv / linkClicks) * 100) });
   }
 
   const order = { block: 0, warn: 1, info: 2, ok: 3 };
