@@ -1,0 +1,34 @@
+{
+  "key": "sinabung",
+  "name": "The R Villa Sinabung",
+  "updated": "2026-11-06",
+  "guestsMax": 4,
+  "bedrooms": 2,
+  "bathrooms": 2,
+  "bedroomsText": "2, each with a king-size bed (one upstairs, one downstairs)",
+  "facts": [
+    { "text": "Sleeps up to 4 guests.", "status": "elev8", "source": "Elev8 maximum capacity, 2026-11-06" },
+    { "text": "2 bedrooms, each with a king-size bed, one upstairs and one downstairs, and 2 full bathrooms.", "status": "elev8", "source": "Elev8 questionnaire, 2026-11-06" },
+    { "text": "Private pool and a private entrance.", "status": "elev8", "source": "Elev8 questionnaire (outdoor amenities)", "tags": ["pool"] },
+    { "text": "Air conditioning and ceiling fans, WiFi and a smart TV (YouTube and Netflix, no regular TV channels).", "status": "elev8", "source": "Elev8 questionnaire" },
+    { "text": "Kitchen with dishwasher, stove, blender, kettle, coffee maker and refrigerator.", "status": "elev8", "source": "Elev8 questionnaire" },
+    { "text": "Hair dryer; linens, towels and beach essentials are provided.", "status": "elev8", "source": "Elev8 questionnaire" },
+    { "text": "In Sanur on Jalan Danau Poso, about a 10-minute walk to Cemara Beach.", "status": "elev8", "source": "Elev8 questionnaire (neighborhood)" },
+    { "text": "Paid parking on the premises.", "status": "elev8", "source": "Elev8 questionnaire (outdoor amenities)" }
+  ],
+  "absent": [],
+  "open": [
+    "The questionnaire lists a hot tub and a bathtub, but this is inconsistent between answers. Do not mention either.",
+    "A small room under the stairs 'may be under maintenance'. Do not mention it.",
+    "The villa has two levels. Never say single-level.",
+    "Elev8 lists a size of 150 without saying what it measures. Do not state a size.",
+    "Barbecue, gym, cinema and rooftop are not confirmed. Do not mention them.",
+    "Everything on this sheet comes from the Elev8 questionnaire and is still to be confirmed by the owner."
+  ],
+  "catalog": [
+    "Sleeps up to 4 guests in 2 bedrooms with king-size beds (one upstairs, one downstairs) and 2 full bathrooms.",
+    "Private pool and a private entrance.",
+    "Air conditioning, ceiling fans, WiFi, smart TV and a kitchen with dishwasher, stove, kettle and coffee maker.",
+    "In Sanur, about a 10-minute walk to Cemara Beach. Paid parking on the premises."
+  ]
+}

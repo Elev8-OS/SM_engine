@@ -1,0 +1,20 @@
+{
+  "key": "apt-mezzanine",
+  "name": "The R Apartments Mezzanine",
+  "updated": "2026-11-06",
+  "guestsMax": 3,
+  "facts": [
+    { "text": "Mezzanine apartments with a balcony, for up to 3 guests.", "status": "elev8", "source": "Elev8 listing name ('Mezzanine Apartment w/ balcony') and maximum capacity 3 for APT 8 to 11, 2026-11-06" },
+    { "text": "On Jalan Pantai Pererenan in Pererenan.", "status": "elev8", "source": "Elev8 address" }
+  ],
+  "absent": [],
+  "open": [
+    "The Elev8 questionnaire has no usable amenity list for these units. Do not mention any amenity.",
+    "A size of 40 m² is known for APT 8 only. Do not state a size.",
+    "This sheet is minimal on purpose. Add facts once the owner confirms them."
+  ],
+  "catalog": [
+    "Mezzanine apartments with a balcony, for up to 3 guests.",
+    "On Jalan Pantai Pererenan in Pererenan."
+  ]
+}

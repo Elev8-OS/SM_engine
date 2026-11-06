@@ -1,0 +1,21 @@
+{
+  "key": "apt-plunge",
+  "name": "The R Apartments Mezzanine with Plunge Pool",
+  "updated": "2026-11-06",
+  "guestsMax": 3,
+  "facts": [
+    { "text": "Mezzanine studios with a plunge pool, for up to 3 guests.", "status": "elev8", "source": "Elev8 listing names ('Mezzanine Studio + Plunge Pool') and maximum capacity 3 for APT 1 to 3, 2026-11-06" },
+    { "text": "On Jalan Pantai Pererenan in Pererenan.", "status": "elev8", "source": "Elev8 address" }
+  ],
+  "absent": [],
+  "open": [
+    "It is not stated whether the plunge pool is private or shared. Do not say private.",
+    "The Elev8 questionnaire has no usable amenity list for these units. Do not mention any other amenity.",
+    "A size of 48 m² is known for APT 1 only. Do not state a size.",
+    "This sheet is minimal on purpose. Add facts once the owner confirms them."
+  ],
+  "catalog": [
+    "Mezzanine studios with a plunge pool, for up to 3 guests.",
+    "On Jalan Pantai Pererenan in Pererenan."
+  ]
+}

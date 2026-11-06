@@ -1,7 +1,7 @@
 {
   "key": "patuha",
   "name": "The R Villa Patuha",
-  "updated": "2026-11-03",
+  "updated": "2026-11-06",
   "guestsMax": 8,
   "bedrooms": 4,
   "bathrooms": 3,
@@ -25,5 +25,11 @@
     "A rooftop terrace with rice field and sunset views is listed by Elev8 but not confirmed. Do not mention the rooftop or sunset views.",
     "One other villa is nearby. Never call the villa secluded or say there are no neighbours.",
     "Distance to the beach is not confirmed."
+  ],
+  "catalog": [
+    "Sleeps up to 8 guests in 4 bedrooms with 3 bathrooms: two bedrooms with king beds, one with two single beds, all with their own bathroom, plus an office bedroom with a sofa bed.",
+    "Private pool facing the rice fields.",
+    "Workspace with desk and WiFi, fully equipped kitchen and air conditioning in the bedrooms.",
+    "Free parking for cars and motorbikes. No pets."
   ]
 }

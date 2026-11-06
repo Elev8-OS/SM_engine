@@ -1,7 +1,7 @@
 {
   "key": "masurai",
   "name": "The R Villa Masurai",
-  "updated": "2026-11-05",
+  "updated": "2026-11-06",
   "guestsMax": 4,
   "bedrooms": 2,
   "bathrooms": 2,
@@ -33,5 +33,11 @@
     "Hot tub, barbecue, gym, rooftop, sauna and a dedicated desk or workspace are not confirmed. Do not mention them.",
     "Whether a crib or highchair is kept on site is unclear. Do not mention them.",
     "A cleaning fee is not stored yet. Do not state an amount and do not say there is none: say the final price with all fees is shown on the booking page."
+  ],
+  "catalog": [
+    "Sleeps up to 4 guests in 2 bedrooms with queen-size beds and 2 full bathrooms.",
+    "Private pool and a private home cinema.",
+    "Air conditioning, WiFi, a fully equipped kitchen, a living room, laundry facilities and parking on the property.",
+    "In a calm part of Pererenan, about 45 to 60 minutes from Ngurah Rai Airport. Pets are not allowed."
   ]
 }

@@ -1,0 +1,36 @@
+{
+  "key": "dempo",
+  "name": "The R Villa Dempo",
+  "updated": "2026-11-06",
+  "guestsMax": 4,
+  "bedrooms": 2,
+  "bathrooms": 2,
+  "bedroomsText": "2, each with a king-size bed",
+  "facts": [
+    { "text": "Sleeps up to 4 guests.", "status": "elev8", "source": "Elev8 maximum capacity, 2026-11-06" },
+    { "text": "2 bedrooms, each with a king-size bed, and 2 bathrooms.", "status": "elev8", "source": "Elev8 questionnaire, 2026-11-06" },
+    { "text": "Private pool.", "status": "elev8", "source": "Elev8 questionnaire (outdoor amenities)", "tags": ["pool"] },
+    { "text": "A garden, a balcony, outdoor furniture and a private entrance.", "status": "elev8", "source": "Elev8 questionnaire (outdoor amenities and description)", "tags": ["garden"] },
+    { "text": "Free parking on the premises.", "status": "elev8", "source": "Elev8 questionnaire" },
+    { "text": "Air conditioning, WiFi, a TV and a stereo sound system.", "status": "elev8", "source": "Elev8 questionnaire" },
+    { "text": "Kitchen with stove, microwave, kettle, coffee maker, toaster, blender and a refrigerator with freezer.", "status": "elev8", "source": "Elev8 questionnaire" },
+    { "text": "Safe, hair dryer and ironing board; linens are provided.", "status": "elev8", "source": "Elev8 questionnaire" },
+    { "text": "A crib is available.", "status": "elev8", "source": "Elev8 questionnaire (family amenities)" },
+    { "text": "In Pererenan on Jalan Belulang Yeh, about 45 to 60 minutes by car from Ngurah Rai Airport.", "status": "elev8", "source": "Elev8 questionnaire (how to find the property)" }
+  ],
+  "absent": [],
+  "open": [
+    "No view claims (rice fields, sunset, ocean) are confirmed.",
+    "The villa is not beachfront. Give no beach distance.",
+    "Whether the villa has one level or more is not stated. Do not say single-level.",
+    "Elev8 lists a size of 250 without saying what it measures (plot or building). Do not state a size.",
+    "Hot tub, barbecue, gym, cinema and rooftop are not confirmed. Do not mention them.",
+    "Everything on this sheet comes from the Elev8 questionnaire and is still to be confirmed by the owner."
+  ],
+  "catalog": [
+    "Sleeps up to 4 guests in 2 bedrooms with king-size beds and 2 bathrooms.",
+    "Private pool, garden, balcony and outdoor furniture.",
+    "Air conditioning, WiFi, TV, stereo and a kitchen with stove, microwave, coffee maker and fridge-freezer.",
+    "Free parking on the premises. In Pererenan, about 45 to 60 minutes by car from Ngurah Rai Airport."
+  ]
+}

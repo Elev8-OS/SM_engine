@@ -1,0 +1,20 @@
+{
+  "key": "merapi",
+  "name": "The R Villa Merapi (shared villa)",
+  "updated": "2026-11-06",
+  "facts": [
+    { "text": "A shared villa with 5 private rooms, each for up to 2 guests.", "status": "elev8", "source": "Elev8 (5 rooms, maximum capacity 2 each), 2026-11-06" },
+    { "text": "On Jalan Sempol in Pererenan.", "status": "elev8", "source": "Elev8 questionnaire (address)" }
+  ],
+  "absent": [],
+  "open": [
+    "Elev8 lists 5 rooms of 2 guests, Vrbo a 5-bedroom villa for 10 guests. How it is sold is not confirmed.",
+    "The Elev8 questionnaire has no amenities, bedrooms, bathrooms or description for this villa. Do not mention any amenity, pool or view.",
+    "Elev8 lists 35 m² for room 1 only. Do not state a size.",
+    "This sheet is minimal on purpose. Add facts once the owner confirms them."
+  ],
+  "catalog": [
+    "A shared villa with five private rooms, each for up to 2 guests.",
+    "On Jalan Sempol in Pererenan."
+  ]
+}
