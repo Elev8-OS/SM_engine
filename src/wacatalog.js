@@ -9,7 +9,7 @@ import { lowestNightly, allBlockedRanges, priceString, priceLabel, roundPrice, c
 // WhatsApp catalog: one product per villa in a Meta commerce catalog that is connected to the WhatsApp Business account.
 // The engine creates the catalog (needs META_BUSINESS_ID and a token with catalog_management), keeps it up to date and
 // never sends a guess:
-//   text    from the fact sheet of the villa (confirmed and Elev8 facts, plus what is not available)
+//   text    from the fact sheet of the villa (the "catalog" sentences, each one taken from the facts)
 //   photos  the Elev8 gallery of the listing (public links, in gallery order), the first one is the main image
 //   price   lowest nightly price over the next 90 days on free nights: PriceLabs (the price pushed to the channels), free
 //           nights from Elev8. Shown in IDR (WA_CATALOG_CURRENCY): the CHF price is converted with the ECB rate of the day and
@@ -49,6 +49,7 @@ const aptNo = (name) => {
 const aptUnits = (nums) => (u) => nums.includes(aptNo(u.internal_name));
 
 // Products that are not a single listing. units picks the Elev8 listings behind the product by their internal name.
+// url: the booking page on elevate-villas.com (one page per category; for Merapi the page of room 1).
 const SPECIAL = {
   merapi: {
     retailerId: 'villa-merapi',
@@ -56,13 +57,13 @@ const SPECIAL = {
     area: 'Pererenan',
     guests: null,
     highlights: 'Shared villa with five private rooms, up to 2 guests per room',
-    url: `${SITE}/property/the-r-villa-merapi-0a1e5106`,
+    url: `${SITE}/property/the-r-villa-merapi-0e45abbd`,
     units: (u) => /merapi/i.test(String(u.internal_name || '')),
     priceListings: MERAPI_PL
   },
-  'apt-studio': { retailerId: 'apartment-studio', name: 'The R Apartments Studio', area: 'Pererenan', guests: null, highlights: 'Studio apartments, walk to the beach', url: SITE, units: aptUnits([4, 5, 6, 7]) },
-  'apt-mezzanine': { retailerId: 'apartment-mezzanine', name: 'The R Apartments Mezzanine', area: 'Pererenan', guests: 3, highlights: 'Mezzanine apartments with balcony', url: SITE, units: aptUnits([8, 9, 10, 11]) },
-  'apt-plunge': { retailerId: 'apartment-plunge-pool', name: 'The R Apartments Mezzanine with Plunge Pool', area: 'Pererenan', guests: 3, highlights: 'Mezzanine studio with plunge pool', url: SITE, units: aptUnits([1, 2, 3]) }
+  'apt-studio': { retailerId: 'apartment-studio', name: 'The R Apartments Studio', area: 'Pererenan', guests: null, highlights: 'Studio apartments, walk to the beach', url: `${SITE}/property/the-r-apartments-studio-dc20bb99`, units: aptUnits([4, 5, 6, 7]) },
+  'apt-mezzanine': { retailerId: 'apartment-mezzanine', name: 'The R Apartments Mezzanine', area: 'Pererenan', guests: 3, highlights: 'Mezzanine apartments with balcony', url: `${SITE}/property/the-r-pererenan-mezzanine-apartment-w-balcony-90672e94`, units: aptUnits([8, 9, 10, 11]) },
+  'apt-plunge': { retailerId: 'apartment-plunge-pool', name: 'The R Apartments Mezzanine with Plunge Pool', area: 'Pererenan', guests: 3, highlights: 'Mezzanine studio with plunge pool', url: `${SITE}/property/1-3-plunge-pool-0efd1608`, units: aptUnits([1, 2, 3]) }
 };
 
 export const waCatalogSettings = () => ({

@@ -4,18 +4,24 @@
   "updated": "2026-11-06",
   "guestsMax": 3,
   "facts": [
-    { "text": "Mezzanine studios with a plunge pool, for up to 3 guests.", "status": "elev8", "source": "Elev8 listing names ('Mezzanine Studio + Plunge Pool') and maximum capacity 3 for APT 1 to 3, 2026-11-06" },
-    { "text": "On Jalan Pantai Pererenan in Pererenan.", "status": "elev8", "source": "Elev8 address" }
+    { "text": "A 48 m² mezzanine studio for up to 3 guests, with king beds and sofa beds.", "status": "elev8", "source": "elevate-villas.com plunge pool page, 2026-11-06" },
+    { "text": "A private plunge pool with direct access from the unit, a garden and poolside seating; a private entrance.", "status": "elev8", "source": "elevate-villas.com plunge pool page", "tags": ["pool"] },
+    { "text": "Air conditioning, WiFi, TV and hot water; a dedicated office space, a safe box and a hair dryer; linens and towels are provided.", "status": "elev8", "source": "elevate-villas.com plunge pool page" },
+    { "text": "Full kitchen with stove, microwave, blender, coffee maker, toaster, kettle and a refrigerator with freezer.", "status": "elev8", "source": "elevate-villas.com plunge pool page" },
+    { "text": "Free parking on the premises. Pererenan Beach is about 5 minutes on foot.", "status": "elev8", "source": "elevate-villas.com plunge pool page" }
   ],
-  "absent": [],
+  "absent": [
+    { "term": "pets", "text": "Pets are not allowed.", "source": "elevate-villas.com plunge pool page" }
+  ],
   "open": [
-    "It is not stated whether the plunge pool is private or shared. Do not say private.",
-    "The Elev8 questionnaire has no usable amenity list for these units. Do not mention any other amenity.",
-    "A size of 48 m² is known for APT 1 only. Do not state a size.",
-    "This sheet is minimal on purpose. Add facts once the owner confirms them."
+    "The size of 48 m² is given on the category page.",
+    "The website lists a bathtub. Not confirmed by the team. Do not mention it.",
+    "This sheet comes from the website and is still to be confirmed by the owner."
   ],
   "catalog": [
-    "Mezzanine studios with a plunge pool, for up to 3 guests.",
-    "On Jalan Pantai Pererenan in Pererenan."
+    "A 48 m² mezzanine studio for up to 3 guests, with king beds and sofa beds.",
+    "Private plunge pool with direct access from the unit, a garden and poolside seating.",
+    "Air conditioning, WiFi, a dedicated office space and a full kitchen with stove, microwave, coffee maker and fridge-freezer.",
+    "Free parking on the premises. Pererenan Beach is about 5 minutes on foot. No pets."
   ]
 }

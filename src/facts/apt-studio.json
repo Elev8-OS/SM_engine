@@ -3,23 +3,27 @@
   "name": "The R Apartments Studio",
   "updated": "2026-11-06",
   "facts": [
-    { "text": "Studio apartments on Jalan Pantai Pererenan, a walk to the beach.", "status": "elev8", "source": "Elev8 listing name ('Studio walk to the Beach') and address, 2026-11-06" },
-    { "text": "Air conditioning, a TV, high-speed fibre internet, a safe and a hair dryer; linens are provided.", "status": "elev8", "source": "Elev8 questionnaire (indoor amenities of APT 4)" },
-    { "text": "Kitchen with stove, microwave, kettle, coffee maker, toaster, blender and a refrigerator with freezer.", "status": "elev8", "source": "Elev8 questionnaire (indoor amenities of APT 4)" },
-    { "text": "A high chair is available.", "status": "elev8", "source": "Elev8 questionnaire (indoor amenities of APT 4)" }
+    { "text": "Studio apartments on Jalan Pantai Pererenan for 2 to 4 guests (4 guests for the studio on the linked page, 2 for the studio 'Walk to the Beach').", "status": "elev8", "source": "elevate-villas.com apartment pages, 2026-11-06" },
+    { "text": "Pool access (shared pool), a garden with outdoor seating and a private entrance.", "status": "elev8", "source": "elevate-villas.com studio page ('Garden and Pool: shared pool')" },
+    { "text": "Air conditioning, TV, WiFi and hot water; a safe box, hair dryer and linens.", "status": "elev8", "source": "elevate-villas.com studio page and Elev8 questionnaire" },
+    { "text": "Full kitchen with stove, microwave, blender, toaster, coffee maker, kettle, and a refrigerator with freezer.", "status": "elev8", "source": "elevate-villas.com studio page" },
+    { "text": "Pererenan Beach is about 5 minutes on foot. Paid parking off premises.", "status": "elev8", "source": "elevate-villas.com studio page" },
+    { "text": "A high chair is available.", "status": "elev8", "source": "Elev8 questionnaire" }
   ],
-  "absent": [],
+  "absent": [
+    { "term": "pets", "text": "Pets are not allowed.", "source": "elevate-villas.com studio page" }
+  ],
   "open": [
-    "The 'describe the property' answer in the questionnaire was copied from the Sinabung villa in Sanur. Do not use it.",
-    "Sleeping capacity differs by unit: 4 guests for APT 4, 2 for APT 5, 6 and 7. Do not state a guest number for the category.",
-    "A size of 28 m² is known for APT 4 only. Do not state a size.",
-    "The distance to the beach is not given. Do not say how long the walk is.",
-    "Bedrooms and bathrooms are not described. A plunge pool, a garden or a pool is not part of the studio.",
-    "This sheet is minimal on purpose. Add facts once the owner confirms them."
+    "The 'describe the property' answer in the Elev8 questionnaire was copied from the Sinabung villa in Sanur. Do not use it.",
+    "The size of 28 m² belongs to the studio on the linked page. Do not state a size for the category.",
+    "The pool is shared. Never say private pool or plunge pool.",
+    "The website lists a bathtub and heating for the studio. Not confirmed by the team. Do not mention them.",
+    "This sheet comes from the website and the Elev8 questionnaire and is still to be confirmed by the owner."
   ],
   "catalog": [
-    "Studio apartments on Jalan Pantai Pererenan, a walk to the beach.",
-    "Air conditioning, TV, high-speed internet and a kitchen with stove, microwave, kettle, coffee maker and fridge-freezer.",
-    "Safe, hair dryer and linens provided."
+    "Studio apartments on Jalan Pantai Pererenan for 2 to 4 guests.",
+    "Shared pool, a garden with outdoor seating and a private entrance.",
+    "Air conditioning, TV, WiFi and a full kitchen with stove, microwave, kettle, coffee maker and fridge-freezer.",
+    "Pererenan Beach is about 5 minutes on foot. Paid parking off premises. No pets."
   ]
 }

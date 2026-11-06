@@ -4,17 +4,25 @@
   "updated": "2026-11-06",
   "guestsMax": 3,
   "facts": [
-    { "text": "Mezzanine apartments with a balcony, for up to 3 guests.", "status": "elev8", "source": "Elev8 listing name ('Mezzanine Apartment w/ balcony') and maximum capacity 3 for APT 8 to 11, 2026-11-06" },
-    { "text": "On Jalan Pantai Pererenan in Pererenan.", "status": "elev8", "source": "Elev8 address" }
+    { "text": "Mezzanine apartments for up to 3 guests: a king bed on the mezzanine level and a sofa bed in the living room.", "status": "elev8", "source": "elevate-villas.com mezzanine page, 2026-11-06" },
+    { "text": "A balcony with outdoor seating above the garden, a shared pool and a private entrance.", "status": "elev8", "source": "elevate-villas.com mezzanine page" },
+    { "text": "Air conditioning, TV, WiFi, a washer, a safe box and a hair dryer; linens and towels are provided.", "status": "elev8", "source": "elevate-villas.com mezzanine page" },
+    { "text": "Full kitchen with stove, microwave, toaster, coffee maker, blender, kettle and a refrigerator with freezer.", "status": "elev8", "source": "elevate-villas.com mezzanine page" },
+    { "text": "Free parking on the premises. Pererenan Beach is about 5 minutes on foot.", "status": "elev8", "source": "elevate-villas.com mezzanine page" }
   ],
-  "absent": [],
+  "absent": [
+    { "term": "pets", "text": "Pets are not allowed.", "source": "elevate-villas.com mezzanine page" }
+  ],
   "open": [
-    "The Elev8 questionnaire has no usable amenity list for these units. Do not mention any amenity.",
+    "The pool is shared. Never say private pool.",
     "A size of 40 m² is known for APT 8 only. Do not state a size.",
-    "This sheet is minimal on purpose. Add facts once the owner confirms them."
+    "The website lists a bathtub and bidet. Not confirmed by the team. Do not mention them.",
+    "This sheet comes from the website and is still to be confirmed by the owner."
   ],
   "catalog": [
-    "Mezzanine apartments with a balcony, for up to 3 guests.",
-    "On Jalan Pantai Pererenan in Pererenan."
+    "Mezzanine apartments for up to 3 guests: a king bed upstairs and a sofa bed in the living room.",
+    "Balcony with outdoor seating above the garden, a shared pool and a private entrance.",
+    "Air conditioning, TV, WiFi, a washer and a full kitchen with stove, microwave, coffee maker and fridge-freezer.",
+    "Free parking on the premises. Pererenan Beach is about 5 minutes on foot. No pets."
   ]
 }
