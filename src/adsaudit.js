@@ -52,11 +52,13 @@ export async function auditAd(id) {
   const since = now - 7 * 86400;
   const stat = (aggregation) => graph('GET', `${cfg.pixelId}/stats`, { aggregation, start_time: since, end_time: now });
 
-  const [campR, setR, adR, crR, igR, pxR, insR, accR, px, sEvents, sValue, sMethod, sHost, recR] = await Promise.all([
+  // The ad first: an edit in Ads Manager gives the ad a new creative, so the one the app created may no longer be the current one.
+  const adR = await attempt(() => read(m.adId, 'name,status,effective_status,configured_status,issues_info,ad_review_feedback,tracking_specs,conversion_domain,creative{id}'));
+  const creativeId = adR.data?.creative?.id || m.creativeId;
+  const [campR, setR, crR, igR, pxR, insR, accR, px, sEvents, sValue, sMethod, sHost, recR] = await Promise.all([
     attempt(() => read(m.campaignId, 'name,objective,status,effective_status,daily_budget,bid_strategy,buying_type,special_ad_categories')),
     attempt(() => read(m.adsetId, 'name,status,effective_status,optimization_goal,billing_event,destination_type,promoted_object,targeting,attribution_spec,start_time,end_time,learning_stage_info,issues_info')),
-    attempt(() => read(m.adId, 'name,status,effective_status,configured_status,issues_info,ad_review_feedback,tracking_specs,conversion_domain')),
-    attempt(() => read(m.creativeId, 'name,object_story_spec,url_tags,degrees_of_freedom_spec,instagram_actor_id,effective_object_story_id')),
+    attempt(() => read(creativeId, 'name,object_story_spec,url_tags,degrees_of_freedom_spec,instagram_actor_id,instagram_user_id,effective_object_story_id')),
     attempt(() => read(`${accountId()}/instagram_accounts`, 'id,username')),
     attempt(() => read(cfg.pixelId, 'name,last_fired_time,is_unavailable,enable_automatic_matching,first_party_cookie_status,data_use_setting')),
     attempt(() => read(`${m.adId}/insights`, 'impressions,reach,frequency,spend,clicks,ctr,cpc,cpm,inline_link_clicks,actions,cost_per_action_type', { date_preset: 'maximum' })),
@@ -115,6 +117,10 @@ export async function auditAd(id) {
     const t = adset.targeting || {};
     const countries = t.geo_locations?.countries || [];
     add('info', 'conversion', 'audience', `Countries: ${countries.join(', ') || 'none named'}; age ${t.age_min ?? '?'} to ${t.age_max ?? '?'}${t.age_range ? ` (suggestion ${t.age_range.join(' to ')})` : ''}; Advantage+ audience ${t.targeting_automation?.advantage_audience === 1 ? 'on' : 'off'}; placements ${t.publisher_platforms ? t.publisher_platforms.join(', ') : 'automatic'}.`, '', { countries, ageMin: t.age_min ?? null, ageMax: t.age_max ?? null, ageRange: t.age_range ?? null, advantage: t.targeting_automation?.advantage_audience === 1, placements: t.publisher_platforms || null });
+    const plats = t.publisher_platforms;
+    if (!plats) add('ok', 'conversion', 'instagram_placements', 'Placements are automatic, so Instagram (feed, reels, stories) is included.', '', { automatic: true, platforms: null });
+    else if (plats.includes('instagram')) add('ok', 'conversion', 'instagram_placements', `Instagram is included (${plats.join(', ')}).`, '', { automatic: false, platforms: plats });
+    else add('warn', 'conversion', 'instagram_placements', `Instagram is not among the placements (${plats.join(', ')}).`, 'Add Instagram under placements.', { automatic: false, platforms: plats });
     const hasSignal = (t.custom_audiences || []).length > 0 || (t.flexible_spec || []).length > 0;
     if (!hasSignal) add('warn', 'conversion', 'no_audience_signal', 'No custom audience or interest is given as a signal. Meta starts from nothing and has to find the buyers itself.', 'Add website visitors and a list of past guests as audience signals. Later add a lookalike of past guests.', {});
     if (!(adset.end_time)) add('info', 'setup', 'end_time', 'The ad set has no end date.', '', {});
@@ -122,12 +128,13 @@ export async function auditAd(id) {
 
   // ---- Creative and links
   if (crR.ok) {
+    if (creativeId !== m.creativeId) add('info', 'setup', 'creative_changed', 'The ad was edited in Ads Manager after it was sent from here. The audit reads the current version.', '', {});
     const spec = cr.object_story_spec || {};
     const links = [spec.link_data?.link, ...((spec.link_data?.child_attachments || []).map((c) => c.link)), spec.video_data?.call_to_action?.value?.link].filter(Boolean);
     const utmInLink = links.length > 0 && links.every((l) => /utm_source=/i.test(l));
     if (cr.url_tags || utmInLink) add('ok', 'tracking', 'utm', `URL parameters are set (${cr.url_tags || 'in the link'}).`, '', { tags: cr.url_tags || null });
     else add('warn', 'tracking', 'utm', 'The ad has no UTM parameters. Visits and bookings cannot be tied to this ad in your own data.', 'Set URL parameters on the ad: utm_source=facebook&utm_medium=paid_social&utm_campaign={{campaign.name}}&utm_content={{ad.name}} and store them with the booking.', {});
-    const ig = spec.instagram_user_id || spec.instagram_actor_id || cr.instagram_actor_id;
+    const ig = spec.instagram_user_id || spec.instagram_actor_id || cr.instagram_user_id || cr.instagram_actor_id;
     if (!ig) {
       const accounts = igR.ok ? (igR.data.data || []).map((a) => a.username).filter(Boolean) : [];
       add('warn', 'conversion', 'instagram_identity', `The ad runs under the Facebook page only, without an Instagram account${accounts.length ? ` (the ad account offers: ${accounts.join(', ')})` : ' (the ad account has no Instagram account assigned)'}.`, 'Pick the Instagram account in the ad (Identity). In Business Settings assign it to the ad account so the app finds it next time.', { accounts });
@@ -184,7 +191,8 @@ export async function auditAd(id) {
   // ---- Meta's own opportunity score and recommendations for the ad account (read only; applying them stays a decision in Ads Manager)
   {
     const score = accR.ok ? num(accR.data.opportunity_score) : null;
-    const items = recR.ok ? (Array.isArray(recR.data?.data) ? recR.data.data : Array.isArray(recR.data) ? recR.data : []) : [];
+    const rows = recR.ok ? (Array.isArray(recR.data?.data) ? recR.data.data : Array.isArray(recR.data) ? recR.data : []) : [];
+    const items = rows.flatMap((x) => (Array.isArray(x?.recommendations) ? x.recommendations : [x]));
     const recs = items.slice(0, 8).map((r) => ({
       title: String(r.title || r.name || r.headline || r.type || r.recommendation_type || '').slice(0, 160),
       message: String(r.message || r.description || r.body || '').slice(0, 300),
@@ -192,7 +200,7 @@ export async function auditAd(id) {
       type: r.type || r.recommendation_type || null,
       link: r.deep_link || r.deeplink || r.url || null
     }));
-    if (score !== null || recs.length) add('info', 'conversion', 'meta_recommendations', `Meta opportunity score${score !== null ? ` ${score} of 100` : ''}${recs.length ? `; recommendations: ${recs.map((r) => r.title || r.type).join('; ')}` : ''}.`, '', { score, total: items.length, recommendations: recs, fields: Object.keys(items[0] || {}) });
+    if (score !== null || recs.length) add('info', 'conversion', 'meta_recommendations', `Meta opportunity score${score !== null ? ` ${score} of 100` : ''}${recs.length ? `; recommendations: ${recs.map((r) => r.title || r.type).join('; ')}` : ''}.`, '', { score, total: items.length, recommendations: recs, fields: Object.keys(items[0] || {}), sample: JSON.stringify(items[0] ?? null).slice(0, 600) });
   }
 
   // ---- What the ad has done so far
