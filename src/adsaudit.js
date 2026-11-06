@@ -52,7 +52,7 @@ export async function auditAd(id) {
   const since = now - 7 * 86400;
   const stat = (aggregation) => graph('GET', `${cfg.pixelId}/stats`, { aggregation, start_time: since, end_time: now });
 
-  const [campR, setR, adR, crR, igR, pxR, insR, accR, px, sEvents, sValue, sMethod, sHost] = await Promise.all([
+  const [campR, setR, adR, crR, igR, pxR, insR, accR, px, sEvents, sValue, sMethod, sHost, recR] = await Promise.all([
     attempt(() => read(m.campaignId, 'name,objective,status,effective_status,daily_budget,bid_strategy,buying_type,special_ad_categories')),
     attempt(() => read(m.adsetId, 'name,status,effective_status,optimization_goal,billing_event,destination_type,promoted_object,targeting,attribution_spec,start_time,end_time,learning_stage_info,issues_info')),
     attempt(() => read(m.adId, 'name,status,effective_status,configured_status,issues_info,ad_review_feedback,tracking_specs,conversion_domain')),
@@ -60,16 +60,17 @@ export async function auditAd(id) {
     attempt(() => read(`${accountId()}/instagram_accounts`, 'id,username')),
     attempt(() => read(cfg.pixelId, 'name,last_fired_time,is_unavailable,enable_automatic_matching,first_party_cookie_status,data_use_setting')),
     attempt(() => read(`${m.adId}/insights`, 'impressions,reach,frequency,spend,clicks,ctr,cpc,cpm,inline_link_clicks,actions,cost_per_action_type', { date_preset: 'maximum' })),
-    attempt(() => read(accountId(), 'account_status,disable_reason,currency,spend_cap,amount_spent,timezone_name')),
+    attempt(() => read(accountId(), 'account_status,disable_reason,currency,spend_cap,amount_spent,timezone_name,opportunity_score')),
     attempt(() => pixelStatus()),
     attempt(() => stat('event_total_counts')),
     attempt(() => stat('event_value_count')),
     attempt(() => stat('event_detection_method')),
-    attempt(() => stat('host'))
+    attempt(() => stat('host')),
+    attempt(() => graph('GET', `${accountId()}/recommendations`, {}))
   ]);
 
   const unread = {};
-  for (const [k, r] of Object.entries({ campaign: campR, adset: setR, ad: adR, creative: crR, instagram: igR, pixel: pxR, insights: insR, account: accR, pixelEvents: px, statEvents: sEvents, statValue: sValue, statMethod: sMethod, statHost: sHost })) if (!r.ok) unread[k] = r.error;
+  for (const [k, r] of Object.entries({ campaign: campR, adset: setR, ad: adR, creative: crR, instagram: igR, pixel: pxR, insights: insR, account: accR, pixelEvents: px, statEvents: sEvents, statValue: sValue, statMethod: sMethod, statHost: sHost, recommendations: recR })) if (!r.ok) unread[k] = r.error;
 
   const camp = campR.data || {};
   const adset = setR.data || {};
@@ -161,6 +162,7 @@ export async function auditAd(id) {
   if (sValue.ok) {
     const withValue = statValues(sValue.data);
     if (Object.keys(withValue).length) add('info', 'tracking', 'value_events', `Events that carry a value: ${Object.entries(withValue).map(([k, n]) => `${k} ${n}`).join(', ')}.`, '', { events: withValue });
+    else if (px.ok && ((px.data.events?.ViewContent || 0) > 0 || (px.data.events?.InitiateCheckout || 0) > 0)) add('warn', 'tracking', 'no_value', 'None of the events carries a value. Meta cannot learn which villas and stays are worth more, and cannot report revenue per ad.', 'Send value and currency with ViewContent, InitiateCheckout and Purchase (the price of the stay), and the villa as content_ids.', {});
   }
   if (sHost.ok) {
     let mine = '';
@@ -177,6 +179,20 @@ export async function auditAd(id) {
     const keys = Object.keys(statValues(sMethod.data));
     const server = keys.some((k) => /server|api|capi/i.test(k));
     add(server ? 'ok' : 'warn', 'tracking', 'server_events', `Events by source in 7 days: ${keys.join(', ') || 'none'}.`, server ? '' : 'No server-side event seen yet. The Purchase through the Conversions API should show up here once a booking is made.', { sources: keys });
+  }
+
+  // ---- Meta's own opportunity score and recommendations for the ad account (read only; applying them stays a decision in Ads Manager)
+  {
+    const score = accR.ok ? num(accR.data.opportunity_score) : null;
+    const items = recR.ok ? (Array.isArray(recR.data?.data) ? recR.data.data : Array.isArray(recR.data) ? recR.data : []) : [];
+    const recs = items.slice(0, 8).map((r) => ({
+      title: String(r.title || r.name || r.headline || r.type || r.recommendation_type || '').slice(0, 160),
+      message: String(r.message || r.description || r.body || '').slice(0, 300),
+      importance: r.importance ?? r.priority ?? null,
+      type: r.type || r.recommendation_type || null,
+      link: r.deep_link || r.deeplink || r.url || null
+    }));
+    if (score !== null || recs.length) add('info', 'conversion', 'meta_recommendations', `Meta opportunity score${score !== null ? ` ${score} of 100` : ''}${recs.length ? `; recommendations: ${recs.map((r) => r.title || r.type).join('; ')}` : ''}.`, '', { score, total: items.length, recommendations: recs, fields: Object.keys(items[0] || {}) });
   }
 
   // ---- What the ad has done so far
