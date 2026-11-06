@@ -20,6 +20,7 @@ import { insightsRoutes } from './insights.js';
 import { brandRoutes } from './brand.js';
 import { adsRoutes } from './ads.js';
 import { adsLiveRoutes, startAdsMonitor } from './ads-live.js';
+import { adsAuditRoutes } from './adsaudit.js';
 import { outreachRoutes } from './outreach.js';
 import { waCatalogRoutes, startWaCatalogSync } from './wacatalog.js';
 
@@ -223,6 +224,7 @@ draftingRoutes(app, needDb, ah);
 brandRoutes(app, ah);
 adsRoutes(app, needDb, ah);
 adsLiveRoutes(app, needDb, ah);
+adsAuditRoutes(app, needDb, ah);
 outreachRoutes(app, ah);
 waCatalogRoutes(app, needDb, ah);
 
