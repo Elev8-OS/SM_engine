@@ -1,7 +1,7 @@
 import { q } from './db.js';
 import { HttpError } from './util.js';
 import { factsFor } from './facts.js';
-import { cleanPromo, problem, isLive, matchGaps, suggest } from './promo-rules.js';
+import { cleanPromo, isLive, matchGaps, suggest } from './promo-rules.js';
 import { competitorRoutes } from './competitors.js';
 import { startPromoMirror, runMirror, lastMirror, activatePromo, runPlan, lastPlan, autopilotOn } from './promo-elev8.js';
 
@@ -9,7 +9,8 @@ import { startPromoMirror, runMirror, lastMirror, activatePromo, runPlan, lastPl
 //   - by a person in Elev8: they are mirrored here at once (promo-elev8.js), their status follows Elev8;
 //   - by the engine itself: it proposes promotions (drafts with the reasoning), and when one is switched on (by a person, or by the
 //     engine with PROMO_AUTOPILOT=on) it creates the code in Elev8.
-// Nobody creates a code in the SM Manager by hand. The post generator, the WhatsApp catalog and Lea use only what is active here.
+// Nobody creates a code in the SM Manager by hand. Several promotions can be active at the same time.
+// The post generator, the WhatsApp catalog and Lea use only what is active here.
 
 let ready = null;
 export function ensurePromoSchema() {
@@ -74,8 +75,12 @@ export function promoRoutes(app, needDb, ah) {
   app.get('/promos/mirror', needDb, ah(async (_req, res) => res.json(lastMirror() || { at: null, note: 'No run since the start yet' })));
   app.post('/promos/mirror', needDb, ah(async (_req, res) => res.json(await runMirror({ ensureSchema: ensurePromoSchema }))));
 
-  // The planner of the engine: the last round, and a round on demand (?dry=1 shows the proposals and stores nothing).
-  app.get('/promos/plan', needDb, ah(async (_req, res) => res.json({ autopilot: autopilotOn(), last: lastPlan() })));
+  // The planner of the engine. GET shows the last round; GET ?dry=1 plays a round and shows what it would propose (nothing is stored
+  // or created). POST runs a round that stores the proposals (?dry=1 plays it only).
+  app.get('/promos/plan', needDb, ah(async (req, res) => {
+    if (String(req.query.dry || '') === '1') return res.json(await runPlan({ ensureSchema: ensurePromoSchema, dry: true }));
+    res.json({ autopilot: autopilotOn(), last: lastPlan() });
+  }));
   app.post('/promos/plan', needDb, ah(async (req, res) => res.json(await runPlan({ ensureSchema: ensurePromoSchema, dry: String(req.query.dry || '') === '1' }))));
 
   // Ideas from the open nights in Elev8 (what the planner starts from). They change nothing.
