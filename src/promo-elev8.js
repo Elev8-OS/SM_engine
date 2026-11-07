@@ -367,14 +367,19 @@ export const stepNights = (n) => (n ? STEPS.find((s) => s >= n) ?? n : null);
  * picks: { key, name, benefit, resolved, minNights, stay_from, stay_to, book_until, cost, share }.
  * Returns groups { benefit, resolved, minNights, stay_from, stay_to, book_until, keys, names, picks }: the window is the widest
  * of the villas, the minimum stay is the same for all (rounded up), and the villas must offer exactly the same service in Elev8.
+ * Different benefits, or the same benefit with another minimum stay, are different codes.
  */
 export function groupPicks(picks) {
   const groups = new Map();
   for (const p of picks) {
     const minNights = stepNights(p.minNights);
-    const k = [p.benefit, minNights ?? '', p.stay_to ?? '', p.book_until ?? '', p.resolved.raw_name, p.resolved.raw_item].join('|');
+    // Same benefit, same minimum stay, same service in Elev8: one code. The runtimes of the villas differ by a few days only,
+    // so the code takes the widest of them (it costs nothing extra, the cost is per booking).
+    const k = [p.benefit, minNights ?? '', p.resolved.raw_name, p.resolved.raw_item].join('|');
     const g = groups.get(k) || { benefit: p.benefit, resolved: p.resolved, minNights, stay_from: p.stay_from, stay_to: p.stay_to, book_until: p.book_until, keys: [], names: [], picks: [], listings: [] };
     if (p.stay_from && (!g.stay_from || p.stay_from < g.stay_from)) g.stay_from = p.stay_from;
+    if (p.stay_to && (!g.stay_to || p.stay_to > g.stay_to)) g.stay_to = p.stay_to;
+    if (p.book_until && (!g.book_until || p.book_until > g.book_until)) g.book_until = p.book_until;
     g.keys.push(p.key);
     g.names.push(p.name);
     g.picks.push(p);
