@@ -4,6 +4,7 @@ import { graph } from './meta.js';
 import { elev8Tool, pricelabsRows, pricelabsBase, priceIds } from './agent/clients.js';
 import { factsFor, withFacts } from './facts.js';
 import { usdRates } from './fx.js';
+import { livePromos } from './promos.js';
 import { lowestNightly, allBlockedRanges, priceString, priceLabel, roundPrice, convertAmount, productUrl, productTitle, sizeBand, PRODUCT_SETS, describeVilla, galleryUrls, withCover, batchSummary } from './wacatalog-core.js';
 
 // WhatsApp catalog: one product per villa in a Meta commerce catalog that is connected to the WhatsApp Business account.
@@ -19,8 +20,10 @@ import { lowestNightly, allBlockedRanges, priceString, priceLabel, roundPrice, c
 //           is marked "out of stock" and says "Currently not available." in the text (otherwise "Dates available."). A property
 //           without any price or rate is not sent; its item at Meta stays as it is.
 //   link    booking page of the villa with utm_source=whatsapp
-//   labels  custom_label_0 type (villa, apartment, shared villa), 1 area, 2 size band: for the collections and for catalog ads
-//   collections  product sets (PRODUCT_SETS in the core file), created when they are missing
+//   labels  custom_label_0 type (villa, apartment, shared villa), 1 area, 2 size band, 3 "offer" while a promotion runs for the
+//           property (the SM Manager "Aktionen"): for the collections and for catalog ads. The title and the text do not change
+//           with a promotion, so a promotion does not send the product to a new check at Meta.
+//   collections  product sets (PRODUCT_SETS in the core file and "Special offers" below), created when they are missing
 // Besides the single villas there are products that stand for several units: the apartment categories and the shared villa
 // Merapi (SPECIAL below). A unit-based product is sold out only when every unit is blocked; its price is the lowest over the units.
 // Preview first (nothing is written), then sync. A sync runs about every 6 hours when WA_CATALOG_AUTO=on and a catalog exists.
@@ -41,6 +44,11 @@ const baliToday = () => {
 const list = (v, d) => String(v || d).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
 
 const SITE = 'https://www.elevate-villas.com';
+
+// The collection of the properties that have a running promotion (custom_label_3 = offer).
+const OFFER_SET = { name: 'Special offers', label: 3, value: 'offer' };
+// The key of a catalog product in the promotions: the apartment categories share the key "apartments".
+const promoKey = (key) => (String(key).startsWith('apt-') ? 'apartments' : key);
 
 // PriceLabs listings (channex) that are not in PRICELABS_LISTINGS yet. The variable wins when it has the key.
 const PL_FALLBACK = {
@@ -316,6 +324,8 @@ export async function buildProduct(prop, settings, special = null) {
   if (prop.area) payload.custom_label_1 = String(prop.area);
   const band = sizeBand(sheet?.bedrooms);
   if (band && !special) payload.custom_label_2 = band;
+  // A running promotion for this property (or for all): the label only, nothing the guest reads changes.
+  if ((settings.promos || []).some((x) => x.property_key === 'all' || x.property_key === promoKey(key))) payload.custom_label_3 = OFFER_SET.value;
   return {
     retailerId,
     propertyKey: key,
@@ -348,7 +358,10 @@ async function mapLimit(items, limit, fn) {
 }
 
 async function buildAll() {
-  const s = waCatalogSettings();
+  const settings = waCatalogSettings();
+  // The running promotions are read once. If they cannot be read, no product gets the offer label this time.
+  const promos = await livePromos().catch(() => []);
+  const s = { ...settings, promos };
   const props = await q('select * from properties where key = any($1)', [s.villas.filter((k) => !SPECIAL[k])]);
   const results = await mapLimit(s.villas, 3, async (key) => {
     const sp = SPECIAL[key];
@@ -401,7 +414,7 @@ async function ensureProductSets(catalog) {
   } catch (e) {
     return [`collections not checked (${String(e.message || e).slice(0, 150)})`];
   }
-  for (const s of PRODUCT_SETS) {
+  for (const s of [...PRODUCT_SETS, OFFER_SET]) {
     if (byName.has(s.name)) continue;
     try {
       await graph('POST', `${catalog}/product_sets`, { name: s.name, filter: { [`custom_label_${s.label}`]: { eq: s.value } } });
@@ -414,7 +427,8 @@ async function ensureProductSets(catalog) {
 
 /**
  * What to send for one product. A new product (or force) goes with every field. A known product goes with the fields that differ
- * from the last send; nothing differs means nothing is sent. Photos are set again only when they changed or the last try failed.
+ * from the last send; nothing differs means nothing is sent. A custom label that is gone now (a promotion that ended) is sent
+ * empty. Photos are set again only when they changed or the last try failed.
  * old is the stored payload of the last send (it also carries __photos, the photo list, and __photosOk, whether the extra photos were set).
  */
 export function planItem(item, old, force = false) {
@@ -426,6 +440,12 @@ export function planItem(item, old, force = false) {
   for (const [k, v] of Object.entries(item.payload)) {
     if (JSON.stringify(v) !== JSON.stringify(before[k])) {
       data[k] = v;
+      changed.push(k);
+    }
+  }
+  for (const [k, v] of Object.entries(before)) {
+    if (k.startsWith('custom_label_') && v && !(k in item.payload)) {
+      data[k] = '';
       changed.push(k);
     }
   }
