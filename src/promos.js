@@ -60,6 +60,17 @@ export async function livePromosFor(keys, day = today()) {
 // The content of a promotion (villa, code, terms, dates) is never changed here: it comes from Elev8 or from the engine.
 const CONTENT_FIELDS = ['property_key', 'title', 'code', 'terms', 'stay_from', 'stay_to', 'book_until', 'min_nights'];
 
+// A round of the planner on one short line per proposal, for a quick look: code, benefit, minimum stay, cost share.
+const brief = (r) => ({
+  at: r.at,
+  dry: r.dry,
+  autopilot: r.autopilot,
+  n: r.proposed?.length ?? 0,
+  proposed: (r.proposed || []).map((p) => `${p.code} ${p.benefit} min${p.min_nights ?? '-'} ${Math.round((p.cost_share || 0) * 100)}%`).join(' | '),
+  skipped: (r.skipped || []).map((s) => String(s).replace(/^The R /, '').slice(0, 90)),
+  errors: r.errors
+});
+
 export function promoRoutes(app, needDb, ah) {
   // Mirror of the codes of Elev8 (every 5 minutes) and the planner of the engine.
   startPromoMirror({ ensureSchema: ensurePromoSchema });
@@ -76,10 +87,15 @@ export function promoRoutes(app, needDb, ah) {
   app.post('/promos/mirror', needDb, ah(async (_req, res) => res.json(await runMirror({ ensureSchema: ensurePromoSchema }))));
 
   // The planner of the engine. GET shows the last round; GET ?dry=1 plays a round and shows what it would propose (nothing is stored
-  // or created). POST runs a round that stores the proposals (?dry=1 plays it only).
+  // or created). POST runs a round that stores the proposals (?dry=1 plays it only). ?brief=1 shortens the answer to one line per proposal.
   app.get('/promos/plan', needDb, ah(async (req, res) => {
-    if (String(req.query.dry || '') === '1') return res.json(await runPlan({ ensureSchema: ensurePromoSchema, dry: true }));
-    res.json({ autopilot: autopilotOn(), last: lastPlan() });
+    const short = String(req.query.brief || '') === '1';
+    if (String(req.query.dry || '') === '1') {
+      const r = await runPlan({ ensureSchema: ensurePromoSchema, dry: true });
+      return res.json(short ? brief(r) : r);
+    }
+    const last = lastPlan();
+    res.json({ autopilot: autopilotOn(), last: short && last ? brief(last) : last });
   }));
   app.post('/promos/plan', needDb, ah(async (req, res) => res.json(await runPlan({ ensureSchema: ensurePromoSchema, dry: String(req.query.dry || '') === '1' }))));
 
