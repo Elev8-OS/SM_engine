@@ -106,7 +106,38 @@ export async function reviewCatalog() {
   };
 }
 
+/**
+ * A test, not a feature: change ONE field of ONE product at Meta and nothing else, to find out which kind of change makes WhatsApp
+ * drop the product from its list for a while (the product stays "published" at Meta).
+ *   price      the price goes up by 10,000 IDR (the next normal sync sets the real price again)
+ *   label_off  custom_label_3 is emptied (the offer label)
+ *   label_on   custom_label_3 is set to "offer" again
+ * The stored copy of the engine is not changed, so a normal sync does not know about it: put the label back with label_on.
+ *   GET /wa-catalog/touch?key=sinabung&change=price&confirm=1
+ */
+export async function touchProduct(key, change) {
+  const catalog = await catalogId();
+  if (!catalog) throw new HttpError(409, 'There is no catalog yet');
+  const [row] = await q('select retailer_id, payload from wa_catalog_items where property_key = $1', [key]);
+  if (!row) throw new HttpError(404, 'No product stored for this villa');
+  const data = { id: row.retailer_id };
+  if (change === 'price') {
+    const n = Number(String(row.payload?.price || '').split(' ')[0]);
+    if (!(n > 0)) throw new HttpError(409, 'The stored price cannot be read');
+    data.price = `${n + 10000} IDR`;
+  } else if (change === 'label_off') data.custom_label_3 = '';
+  else if (change === 'label_on') data.custom_label_3 = 'offer';
+  else throw new HttpError(400, 'change must be price, label_off or label_on');
+  const r = await graph('POST', `${catalog}/items_batch`, { item_type: 'PRODUCT_ITEM', requests: [{ method: 'UPDATE', data }] });
+  const status = await waitFinished(catalog, r.handles?.[0] ?? null);
+  return { at: new Date().toISOString(), villa: key, product: row.retailer_id, change, sent: Object.keys(data).filter((k) => k !== 'id'), status };
+}
+
 export function recreateRoutes(app, needDb, ah) {
+  app.get('/wa-catalog/touch', needDb, ah(async (req, res) => {
+    if (String(req.query.confirm || '') !== '1') throw new HttpError(400, 'This changes one field of one product at Meta. Add confirm=1.');
+    res.json(await touchProduct(String(req.query.key || ''), String(req.query.change || '')));
+  }));
   app.get('/wa-catalog/review', needDb, ah(async (_req, res) => res.json(await reviewCatalog())));
   app.get('/wa-catalog/recreate', needDb, ah(async (req, res) => {
     const keys = String(req.query.key || '').split(',').map((s) => s.trim()).filter(Boolean);
