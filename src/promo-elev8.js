@@ -15,7 +15,7 @@ import { convertAmount } from './wacatalog-core.js';
 //    affordable: the cost of the benefit may not be more than PROMO_MAX_COST_SHARE (10 %) of the cheapest booking the promotion
 //    allows. If a benefit is too dear for a short stay, the engine asks for a longer minimum stay; if even seven nights are not
 //    enough, it does not offer it. Several promotions can run at the same time, up to PROMO_MAX_PER_VILLA (4) per property, as long
-//    as they give different things. Villas that get the same benefit for the same runtime share ONE code (LATENOV, SPANOV), so
+//    as they give different things. Villas that get the same benefit share ONE code that names it (LATECHECKOUT, FREEMASSAGE), so
 //    Elev8 does not fill up with one code per villa. A proposal is a draft with its reasoning. With PROMO_AUTOPILOT=on the engine
 //    switches its proposals on by itself; otherwise a person switches a proposal on in the SM Manager.
 // 3. Writing. When a proposal is switched on, the engine creates the code in Elev8 (create_promo_code, for all villas of the code at
@@ -342,20 +342,30 @@ export function planProposals({ suggestions, props, existing, maxOpen = 40, maxP
   return { proposals, skipped };
 }
 
-const WORD = { early_checkin: 'EARLY', late_checkout: 'LATE', transfer_car: 'RIDE', transfer_van: 'VAN', spa: 'SPA', breakfast: 'BRKFST', romantic: 'ROMANCE' };
+// The code says what the guest gets. Names are plain words, 24 characters at most.
+const WORD = { early_checkin: 'EARLYCHECKIN', late_checkout: 'LATECHECKOUT', transfer_car: 'AIRPORTRIDE', transfer_van: 'GROUPTRANSFER', spa: 'FREEMASSAGE', breakfast: 'FLOATINGBREAKFAST', romantic: 'ROMANTICESCAPE' };
 const MONTH = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+const MAX_CODE = 24;
 
 /**
- * A short code that is not taken yet. For several villas: the benefit and the month, LATENOV, SPANOV. For one villa the first
- * letters of the villa: LATE-SWAN. If it is taken a number follows: LATENOV2.
+ * A code that says what it gives and is not taken yet. For several villas the benefit alone: LATECHECKOUT, FREEMASSAGE; with a
+ * minimum stay AIRPORTRIDE-3N. For one villa the benefit and the villa: FREEMASSAGE-SAMALAS. If the name is taken the month follows
+ * (LATECHECKOUT-NOV), then a number.
  */
-export function makeCode(keys, benefit, day, taken) {
+export function makeCode(keys, benefit, day, taken, minNights = null) {
   const list = [].concat(keys);
-  const word = WORD[benefit] || 'GIFT';
-  const base = list.length === 1 ? `${word}-${String(list[0]).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4)}` : `${word}${MONTH[Number(day.slice(5, 7)) - 1] || ''}`;
-  let code = base;
-  for (let i = 2; taken.has(code) && i < 30; i++) code = `${base}${i}`;
-  return code;
+  const word = WORD[benefit] || 'FREEGIFT';
+  // the villa name is used whole or not at all, a cut name (SWANTI) says nothing
+  const full = list.length === 1 ? String(list[0]).toUpperCase().replace(/[^A-Z0-9]/g, '') : '';
+  const villa = full && full.length <= MAX_CODE - word.length - 1 ? full : '';
+  const base = list.length === 1 ? (villa ? `${word}-${villa}` : word) : minNights ? `${word}-${minNights}N` : word;
+  const month = MONTH[Number(day.slice(5, 7)) - 1] || '';
+  for (const c of [base, `${base}-${month}`]) if (c.length <= MAX_CODE && !taken.has(c)) return c;
+  for (let i = 2; i < 40; i++) {
+    const c = `${base.slice(0, MAX_CODE - String(i).length)}${i}`;
+    if (!taken.has(c)) return c;
+  }
+  return base;
 }
 
 // Minimum stays are rounded up to 3, 5 or 7 nights, so that villas with almost the same need share one code.
@@ -551,7 +561,7 @@ export async function runPlan({ ensureSchema, dry = false }) {
     }
     // Villas that get the same benefit for the same runtime share one code.
     for (const g of groupPicks(picks)) {
-      const code = makeCode(g.keys, g.benefit, day, taken);
+      const code = makeCode(g.keys, g.benefit, day, taken, g.minNights);
       taken.add(code);
       const label = BENEFITS[g.benefit].label;
       const short = label.replace(/^Complimentary /, '');
