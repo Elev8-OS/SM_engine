@@ -72,7 +72,42 @@ export async function recreateProducts(keys) {
   return out;
 }
 
+/**
+ * What Meta says about the review of each product (changes nothing). One short line per product, because the probe of the SM
+ * engine keeps only the first part of an answer:  <key>:<review status>|<rejection reasons>|<visibility>|<label 3>
+ * Each field is asked for on its own, so a field Meta does not know cannot spoil the others ("-" means: not returned).
+ */
+export async function reviewCatalog() {
+  const catalog = await catalogId();
+  if (!catalog) throw new HttpError(409, 'There is no catalog yet');
+  const fields = ['review_status', 'review_rejection_reasons', 'visibility', 'custom_label_3'];
+  const rows = new Map();
+  const notes = [];
+  for (const f of fields) {
+    try {
+      let after = null;
+      for (let page = 0; page < 3; page++) {
+        const r = await graph('GET', `${catalog}/products`, { fields: `retailer_id,${f}`, limit: 50, ...(after ? { after } : {}) });
+        for (const x of r.data || []) rows.set(x.retailer_id, { ...(rows.get(x.retailer_id) || {}), [f]: x[f] });
+        after = r.paging?.cursors?.after;
+        if (!r.paging?.next || !after) break;
+      }
+    } catch (e) {
+      notes.push(`${f}: ${String(e.message || e).slice(0, 90)}`);
+    }
+  }
+  const sets = await graph('GET', `${catalog}/product_sets`, { fields: 'name,product_count', limit: 25 }).catch((e) => ({ error: String(e.message || e).slice(0, 90) }));
+  const val = (v) => (v === undefined || v === null || v === '' ? '-' : Array.isArray(v) ? v.join('+') || '-' : String(v));
+  const short = (id) => String(id).replace(/^(villa|apartment)-/, '');
+  return {
+    p: [...rows.entries()].map(([id, x]) => `${short(id)}:${val(x.review_status)}|${val(x.review_rejection_reasons)}|${val(x.visibility)}|${val(x.custom_label_3)}`).join(' ; '),
+    sets: sets.error ? sets.error : (sets.data || []).map((x) => `${x.name} ${x.product_count}`).join(' ; '),
+    notes: notes.length ? notes : undefined
+  };
+}
+
 export function recreateRoutes(app, needDb, ah) {
+  app.get('/wa-catalog/review', needDb, ah(async (_req, res) => res.json(await reviewCatalog())));
   app.get('/wa-catalog/recreate', needDb, ah(async (req, res) => {
     const keys = String(req.query.key || '').split(',').map((s) => s.trim()).filter(Boolean);
     if (!keys.length) return res.json(lastRecreate || { note: 'No recreate since the start. Use ?key=masurai&confirm=1' });
