@@ -3,11 +3,13 @@ import { HttpError } from './util.js';
 import { factsFor } from './facts.js';
 import { cleanPromo, problem, isLive, matchGaps, suggest } from './promo-rules.js';
 import { competitorRoutes } from './competitors.js';
-import { startPromoMirror, runMirror, lastMirror } from './promo-elev8.js';
+import { startPromoMirror, runMirror, lastMirror, activatePromo, runPlan, lastPlan, autopilotOn } from './promo-elev8.js';
 
-// Promotions ("Aktionen"): codes with their terms. The codes are created in Elev8 and mirrored here by promo-elev8.js (as drafts, a person
-// switches them on); codes entered by hand here stay as they are. The post generator, the WhatsApp catalog and Lea use only what is
-// active here. Nothing is written into Elev8 by the engine yet.
+// Promotions ("Aktionen"). Codes are created in two places only:
+//   - by a person in Elev8: they are mirrored here at once (promo-elev8.js), their status follows Elev8;
+//   - by the engine itself: it proposes promotions (drafts with the reasoning), and when one is switched on (by a person, or by the
+//     engine with PROMO_AUTOPILOT=on) it creates the code in Elev8.
+// Nobody creates a code in the SM Manager by hand. The post generator, the WhatsApp catalog and Lea use only what is active here.
 
 let ready = null;
 export function ensurePromoSchema() {
@@ -54,33 +56,29 @@ export async function livePromosFor(keys, day = today()) {
   return (await livePromos(day)).filter((p) => p.property_key === 'all' || keys.includes(p.property_key));
 }
 
-const bad = (e) => new HttpError(400, String(e.message || e));
-
-async function checkVilla(key) {
-  if (key === 'all') return;
-  const rows = await q('select 1 from properties where key = $1', [key]);
-  if (!rows.length) throw new HttpError(400, `Unknown villa '${key}'`);
-}
-
-// What a promotion that comes from Elev8 keeps from Elev8: change these there.
-const ELEV8_FIELDS = ['property_key', 'title', 'code', 'terms', 'stay_from', 'stay_to', 'book_until', 'min_nights'];
+// The content of a promotion (villa, code, terms, dates) is never changed here: it comes from Elev8 or from the engine.
+const CONTENT_FIELDS = ['property_key', 'title', 'code', 'terms', 'stay_from', 'stay_to', 'book_until', 'min_nights'];
 
 export function promoRoutes(app, needDb, ah) {
-  // Mirror of the codes of Elev8: first run shortly after the start, then every hour.
+  // Mirror of the codes of Elev8 (every 5 minutes) and the planner of the engine.
   startPromoMirror({ ensureSchema: ensurePromoSchema });
 
   app.get('/promos', needDb, ah(async (_req, res) => {
     await ensurePromoSchema();
     const day = today();
-    const rows = await q(`select ${COLS} from promos order by (status = 'active') desc, id desc limit 200`);
-    res.json({ today: day, promos: rows.map((p) => ({ ...p, live: isLive(p, day) })) });
+    const rows = await q(`select ${COLS} from promos order by (status = 'active') desc, (status = 'draft') desc, id desc limit 200`);
+    res.json({ today: day, autopilot: autopilotOn(), promos: rows.map((p) => ({ ...p, live: isLive(p, day) })) });
   }));
 
   // The last run of the mirror of Elev8 codes, and a run on demand.
   app.get('/promos/mirror', needDb, ah(async (_req, res) => res.json(lastMirror() || { at: null, note: 'No run since the start yet' })));
   app.post('/promos/mirror', needDb, ah(async (_req, res) => res.json(await runMirror({ ensureSchema: ensurePromoSchema }))));
 
-  // Ideas from the open nights in Elev8. They change nothing: the team adopts one and enters the code.
+  // The planner of the engine: the last round, and a round on demand (?dry=1 shows the proposals and stores nothing).
+  app.get('/promos/plan', needDb, ah(async (_req, res) => res.json({ autopilot: autopilotOn(), last: lastPlan() })));
+  app.post('/promos/plan', needDb, ah(async (req, res) => res.json(await runPlan({ ensureSchema: ensurePromoSchema, dry: String(req.query.dry || '') === '1' }))));
+
+  // Ideas from the open nights in Elev8 (what the planner starts from). They change nothing.
   app.get('/promos/suggestions', needDb, ah(async (req, res) => {
     const days = Math.min(Math.max(Number(req.query.days) || 60, 14), 120);
     const day = today();
@@ -94,25 +92,9 @@ export function promoRoutes(app, needDb, ah) {
     }
   }));
 
-  app.post('/promos', needDb, ah(async (req, res) => {
-    await ensurePromoSchema();
-    let clean;
-    try {
-      clean = cleanPromo(req.body || {}, { create: true });
-    } catch (e) {
-      throw bad(e);
-    }
-    const p = { status: 'draft', code: '', terms: '', note: '', stay_from: null, stay_to: null, book_until: null, min_nights: null, suggestion_id: null, ...clean };
-    const err = problem(p);
-    if (err) throw new HttpError(400, err);
-    await checkVilla(p.property_key);
-    const source = req.body?.source === 'suggestion' ? 'suggestion' : 'manual';
-    const rows = await q(
-      `insert into promos (property_key, title, code, terms, stay_from, stay_to, book_until, min_nights, status, source, suggestion_id, note)
-       values ($1,$2,$3,$4,$5::date,$6::date,$7::date,$8,$9,$10,$11,$12) returning ${COLS}`,
-      [p.property_key, p.title, p.code, p.terms, p.stay_from, p.stay_to, p.book_until, p.min_nights, p.status, source, p.suggestion_id, p.note]
-    );
-    res.status(201).json(rows[0]);
+  // Codes cannot be created by hand any more.
+  app.post('/promos', needDb, ah(async () => {
+    throw new HttpError(403, 'Codes are not created in the SM Manager. Create a code in Elev8 (it appears here within minutes), or let the engine propose one.');
   }));
 
   app.put('/promos/:id', needDb, ah(async (req, res) => {
@@ -124,30 +106,38 @@ export function promoRoutes(app, needDb, ah) {
     try {
       clean = cleanPromo(req.body || {});
     } catch (e) {
-      throw bad(e);
+      throw new HttpError(400, String(e.message || e));
     }
-    // A promotion from Elev8: only the status and the note are changed here.
-    if (old.source === 'elev8') {
-      const changed = ELEV8_FIELDS.filter((k) => k in clean && String(clean[k] ?? '') !== String(old[k] ?? ''));
-      if (changed.length) throw new HttpError(409, `This promotion comes from Elev8 (code ${old.code}). Change ${changed.join(', ')} there, it follows here within the hour.`);
+    const changed = CONTENT_FIELDS.filter((k) => k in clean && String(clean[k] ?? '') !== String(old[k] ?? ''));
+    if (changed.length) throw new HttpError(409, `${old.source === 'elev8' ? `This promotion comes from Elev8 (code ${old.code}). Change it there.` : 'The engine decides the content of a promotion.'} Not changed here: ${changed.join(', ')}.`);
+    const next = clean.status;
+    if (next && next !== old.status) {
+      if (old.source === 'elev8') throw new HttpError(409, `The status of ${old.code} follows Elev8. Switch the code on or off there.`);
+      if (old.source === 'engine') {
+        if (next === 'active') {
+          // Creates the code in Elev8. If that fails nothing changes here.
+          try {
+            const row = await activatePromo(id, { ensureSchema: ensurePromoSchema });
+            return res.json({ ...row, live: isLive(row, today()) });
+          } catch (e) {
+            throw new HttpError(502, String(e.message || e).slice(0, 400));
+          }
+        }
+        if (next !== 'ended' || old.status !== 'draft') throw new HttpError(409, 'A proposal of the engine can be switched on or rejected.');
+      } else if (next !== 'ended') {
+        throw new HttpError(409, 'This promotion was entered by hand. It can only be ended, new codes are created in Elev8.');
+      }
     }
-    const p = { ...old, ...clean };
-    const err = problem(p);
-    if (err) throw new HttpError(400, err);
-    if (clean.property_key) await checkVilla(p.property_key);
-    const rows = await q(
-      `update promos set property_key=$2, title=$3, code=$4, terms=$5, stay_from=$6::date, stay_to=$7::date, book_until=$8::date, min_nights=$9, status=$10, note=$11, updated_at=now()
-       where id = $1 returning ${COLS}`,
-      [id, p.property_key, p.title, p.code, p.terms, p.stay_from, p.stay_to, p.book_until, p.min_nights, p.status, p.note]
-    );
+    const rows = await q(`update promos set status = $2, note = $3, updated_at = now() where id = $1 returning ${COLS}`, [id, next ?? old.status, clean.note ?? old.note]);
     res.json({ ...rows[0], live: isLive(rows[0], today()) });
   }));
 
   app.delete('/promos/:id', needDb, ah(async (req, res) => {
     await ensurePromoSchema();
     const id = Number(req.params.id);
-    const [old] = await q('select source, code from promos where id = $1', [id]);
-    if (old?.source === 'elev8') throw new HttpError(409, `This promotion comes from Elev8 (code ${old.code}). Set it to ended instead; the mirror would bring it back as a draft.`);
+    const [old] = await q('select source, status, code from promos where id = $1', [id]);
+    if (old?.source === 'elev8') throw new HttpError(409, `This promotion comes from Elev8 (code ${old.code}). It is ended there.`);
+    if (old?.source === 'engine' && old.status !== 'draft') throw new HttpError(409, 'Only a proposal can be removed.');
     await q('delete from promos where id = $1', [id]);
     res.json({ id, deleted: true });
   }));
