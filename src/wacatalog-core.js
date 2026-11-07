@@ -86,10 +86,46 @@ export function productUrl(baseUrl, key) {
   return u.toString();
 }
 
+/**
+ * Title as it shows in the product list, where a guest sees nothing but the title: name, bedrooms, private pool.
+ * The pool only when a fact says it is private (a shared pool is not mentioned) and the name does not say it already.
+ */
+export function productTitle(name, sheet) {
+  const parts = [String(name)];
+  const n = Number(sheet?.bedrooms);
+  if (n > 0) parts.push(`${n} bedroom${n === 1 ? '' : 's'}`);
+  const privatePool = (sheet?.facts || []).some((f) => (f.tags || []).includes('pool') && /private/i.test(String(f.text || '')));
+  if (privatePool && !/pool/i.test(String(name))) parts.push('private pool');
+  return parts.join(' \u00b7 ').slice(0, 150);
+}
+
+/** Size band for the catalog label "custom_label_2": villas by bedrooms, empty for the rest. */
+export function sizeBand(bedrooms) {
+  const n = Number(bedrooms);
+  if (!(n > 0)) return '';
+  return n >= 4 ? '4+ bedrooms' : n === 1 ? '1 bedroom' : `${n} bedrooms`;
+}
+
+/**
+ * The collections ("product sets") of the catalog. WhatsApp shows them as categories, which helps a guest with 14 products.
+ * Each one filters on a custom label of the product: 0 = type (villa, apartment, shared villa), 1 = area, 2 = size band.
+ */
+export const PRODUCT_SETS = [
+  { name: 'Villas', label: 0, value: 'villa' },
+  { name: '2-bedroom villas', label: 2, value: '2 bedrooms' },
+  { name: '3-bedroom villas', label: 2, value: '3 bedrooms' },
+  { name: 'Large villas, 4+ bedrooms', label: 2, value: '4+ bedrooms' },
+  { name: 'Apartments', label: 0, value: 'apartment' },
+  { name: 'Shared villa', label: 0, value: 'shared villa' },
+  { name: 'Pererenan', label: 1, value: 'Pererenan' },
+  { name: 'Canggu', label: 1, value: 'Canggu' },
+  { name: 'Sanur', label: 1, value: 'Sanur' }
+];
+
 const USABLE = new Set(['confirmed', 'elev8']);
 
 /**
- * Product text, laid out to be read on a phone: the place, the price line, the features as a short list, the booking line.
+ * Product text, laid out to be read on a phone: the place, the price line, the features as a short list, the closing line.
  * Blocks are separated by a blank line, the features by line breaks.
  * When the fact sheet has a "catalog" list (short sentences written for guests, each one taken from the facts) exactly those
  * sentences are used. Without it the confirmed and Elev8 facts and what is NOT available are used. Facts that are not
@@ -110,7 +146,7 @@ export function describeVilla(prop, sheet, fromLine = '') {
   const blocks = [intro];
   if (fromLine) blocks.push(fromLine);
   if (bullets.length) blocks.push(bullets.map((b) => `\u2022 ${b}`).join('\n'));
-  blocks.push('Book direct on elevate-villas.com.');
+  blocks.push('Message us your dates here and we will check availability. You can also book direct on elevate-villas.com.');
   const text = blocks.join('\n\n');
   return text.length > 4000 ? `${text.slice(0, 3990).replace(/\s+\S*$/, '')}.` : text;
 }
@@ -152,6 +188,15 @@ export function galleryUrls(results, max = 10) {
     .map((x) => x.image_url)
     .filter((u) => (seen.has(u) ? false : (seen.add(u), true)))
     .slice(0, max);
+}
+
+/** Moves the photo at position cover (1 = first) to the front. Anything else leaves the list as it is. */
+export function withCover(images, cover) {
+  const n = Number(cover);
+  if (!Array.isArray(images) || !(n > 1) || n > images.length) return images;
+  const rest = [...images];
+  const [pick] = rest.splice(n - 1, 1);
+  return [pick, ...rest];
 }
 
 /** What Meta says about a batch: finished or not, and the problems in plain lines. */
