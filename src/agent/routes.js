@@ -10,7 +10,8 @@ import { livePromos, promoRoutes } from '../promos.js';
 import { readGuest, whyEmpty } from './read.js';
 import { loadSettings, saveSettings, settingsView, mayAutoSend } from './settings.js';
 import { notifyConfigured, buildMail, sendMail } from './notify.js';
-import { callModel, elev8Tool, pricelabsRows, findConversation, getThread, sendInstagram, agentConfig, priceIds } from './clients.js';
+import { callModel, elev8Tool, pricelabsRows, sendInstagram, agentConfig, priceIds } from './clients.js';
+import { waSettings, channelOf, isOurNumber, windowOpen, findLatestConversation, getThreadFull, sendWhatsApp, NOT_READABLE, UNREADABLE_REPLY, WA_PROMPT_NOTE, swapUtm } from './whatsapp.js';
 
 let schemaReady = null;
 function ensureSchema() {
@@ -38,6 +39,7 @@ function ensureSchema() {
       .then(() => q('create index if not exists inquiries_status_idx on inquiries (status, created_at desc)'))
       .then(() => q('alter table inquiries add column if not exists notified_at timestamptz'))
       .then(() => q('alter table inquiries add column if not exists auto_sent boolean not null default false'))
+      .then(() => q("alter table inquiries add column if not exists channel text not null default 'instagram'"))
       .then(() => q("create table if not exists agent_settings (key text primary key, value jsonb not null default '{}'::jsonb, updated_at timestamptz not null default now())"))
       .then(() => q('create table if not exists webhook_debug (id serial primary key, created_at timestamptz not null default now(), note text, keys text, body text)'))
       .catch((e) => {
@@ -136,6 +138,19 @@ export async function execute(name, input) {
   throw new Error(`Unknown tool ${name}`);
 }
 
+/** The tools for one channel: the booking links carry the tracking of that channel. */
+const executeFor = (channel) => async (name, input) => {
+  const out = await execute(name, input);
+  return channel === 'whatsapp' ? swapUtm(out) : out;
+};
+
+/** The system prompt for one channel. */
+function promptFor(channel) {
+  const base = systemPrompt(today());
+  if (channel !== 'whatsapp') return base;
+  return `${base.replace('You answer Instagram direct messages.', 'You answer WhatsApp messages.')}\n${WA_PROMPT_NOTE}`;
+}
+
 function transcript(thread, latest) {
   const lines = (thread || []).slice(-12).map((m) => `${m.direction === 'inbound' ? 'Guest' : 'Team'}: ${m.body}`.trim()).filter((l) => l.length > 7);
   return [lines.length ? `Conversation so far (oldest first):\n${lines.join('\n')}\n` : '', `Latest guest message:\n${latest}`].join('\n');
@@ -147,7 +162,9 @@ async function sendRow(id, message) {
   if (row.status === 'sent') throw new HttpError(409, 'Already sent');
   const text = String(message ?? row.draft ?? '').trim();
   if (!text) throw new HttpError(400, 'There is no text to send');
-  const r = await sendInstagram(row.contact_id, text);
+  const whatsapp = row.channel === 'whatsapp';
+  if (whatsapp && !waSettings().enabled) throw new HttpError(409, 'The WhatsApp assistant is switched off (WA_AGENT_ENABLED)');
+  const r = whatsapp ? await sendWhatsApp(row.contact_id, text) : await sendInstagram(row.contact_id, text);
   if (!r.ok) {
     await q("update inquiries set error = $2, updated_at = now() where id = $1", [id, `GHL send ${r.status}: ${JSON.stringify(r.response).slice(0, 300)}`]);
     throw new HttpError(502, `GHL did not accept the message (${r.status})`);
@@ -170,38 +187,63 @@ async function notifyIfNeeded(id) {
   }
 }
 
+/** An inquiry that is not ours (another channel, another WhatsApp number): ignored, and the personal data is not kept. */
+async function ignoreInquiry(id, channel, why) {
+  await q("update inquiries set status = 'ignored', channel = $2, conversation_id = null, contact_name = null, guest_message = null, thread = null, error = $3, updated_at = now() where id = $1", [id, channel || 'instagram', why]);
+}
+
 /**
  * Reads the guest message, lets Lea write the reply and saves it as a draft.
  * With auto true (a message that just arrived) the answer mode of the SM Manager may send it by itself.
  * A redraft pressed by a person never sends on its own.
+ * Instagram and WhatsApp (the sales number only, and only when switched on) are handled; anything else is ignored.
  */
 export async function processInquiry(id, { auto = false } = {}) {
   const [row] = await q('select * from inquiries where id = $1', [id]);
   if (!row) return;
   try {
+    const wa = waSettings();
     // The text is read with a few retries: GHL fires the webhook before the message is always readable.
-    const read = await readGuest(row, { findConversation, getThread });
+    const read = await readGuest(row, { findConversation: findLatestConversation, getThread: getThreadFull });
     const { conversationId, thread, lastIn, text: guestText } = read;
-    if (lastIn?.type && !/instagram/i.test(lastIn.type)) {
-      await q("update inquiries set status = 'ignored', conversation_id = $2, error = 'Not an Instagram message', updated_at = now() where id = $1", [id, conversationId]);
+    const channel = lastIn?.type ? channelOf(lastIn.type) : 'instagram';
+    if (!channel) {
+      await ignoreInquiry(id, '', 'Not an Instagram or WhatsApp message');
       return;
+    }
+    if (channel === 'whatsapp') {
+      if (!wa.enabled) return void (await ignoreInquiry(id, channel, 'The WhatsApp assistant is switched off'));
+      if (!isOurNumber(lastIn, wa.number)) return void (await ignoreInquiry(id, channel, 'WhatsApp message to another number'));
     }
     if (!guestText) {
       // Not silently ignored: the team is told to look at it in GHL, with the reason.
-      await q("update inquiries set status = 'failed', conversation_id = $2, thread = $3, error = $4, updated_at = now() where id = $1", [id, conversationId, JSON.stringify(thread.slice(-12)), whyEmpty(read)]);
+      await q("update inquiries set status = 'failed', channel = $2, conversation_id = $3, thread = $4, error = $5, updated_at = now() where id = $1", [id, channel, conversationId, JSON.stringify(thread.slice(-12)), whyEmpty(read)]);
       await notifyIfNeeded(id);
       return;
     }
-    const history = lastIn && lastIn.body === guestText ? thread.filter((m) => m !== lastIn) : thread;
-    const result = await runAgent({ system: systemPrompt(today()), userText: transcript(history, guestText), tools: TOOLS, callModel, execute });
-    const needsHuman = result.needs_human || !result.reply;
+    // Only the messages of this channel count as conversation (a WhatsApp phone conversation can hold SMS too).
+    const sameChannel = thread.filter((m) => !m.type || channelOf(m.type) === channel);
+    const history = lastIn && lastIn.body === guestText ? sameChannel.filter((m) => m.id !== lastIn.id) : sameChannel;
+    // Voice messages and photos cannot be read: a fixed polite reply for a person to send, no model call.
+    const unreadable = channel === 'whatsapp' && NOT_READABLE.test(guestText);
+    const result = unreadable
+      ? { reply: UNREADABLE_REPLY, needs_human: true, reason: 'Voice message, photo or another message the assistant cannot read', intent: 'other', language: 'en', trace: [] }
+      : await runAgent({ system: promptFor(channel), userText: transcript(history, guestText), tools: TOOLS, callModel, execute: executeFor(channel) });
+    let needsHuman = result.needs_human || !result.reply;
+    let reason = result.reason;
+    // A WhatsApp reply outside the 24-hour window would be refused: a template is needed, so a person decides.
+    if (channel === 'whatsapp' && !windowOpen(thread)) {
+      needsHuman = true;
+      reason = `Outside the 24-hour WhatsApp window: only an approved template can be sent. ${reason || ''}`.trim();
+    }
     await q(
-      `update inquiries set conversation_id = $2, guest_message = $3, thread = $4, draft = $5, needs_human = $6, reason = $7, intent = $8, language = $9, trace = $10, status = 'draft_ready', error = null, updated_at = now() where id = $1`,
-      [id, conversationId, guestText, JSON.stringify(thread.slice(-12)), result.reply, needsHuman, result.reason, result.intent, result.language, JSON.stringify(result.trace)]
+      `update inquiries set channel = $2, conversation_id = $3, guest_message = $4, thread = $5, draft = $6, needs_human = $7, reason = $8, intent = $9, language = $10, trace = $11, status = 'draft_ready', error = null, updated_at = now() where id = $1`,
+      [id, channel, conversationId, guestText, JSON.stringify(sameChannel.slice(-12)), result.reply, needsHuman, reason, result.intent, result.language, JSON.stringify(result.trace || [])]
     );
     // Answer mode set in the SM Manager: always approve, always automatic, or automatic inside a time window.
-    // A reply that needs a person is never sent by itself.
-    if (auto && mayAutoSend(await loadSettings(q), { reply: result.reply, needs_human: needsHuman })) {
+    // A reply that needs a person is never sent by itself. On WhatsApp automatic sending needs WA_AGENT_AUTO_SEND on top.
+    const modeOk = mayAutoSend(await loadSettings(q), { reply: result.reply, needs_human: needsHuman });
+    if (auto && modeOk && (channel !== 'whatsapp' || wa.autoSend)) {
       await sendRow(id);
       await q('update inquiries set auto_sent = true where id = $1', [id]);
     }
@@ -227,7 +269,10 @@ async function webhook(req, res) {
     .then(() => q('delete from webhook_debug where id < (select max(id) - 30 from webhook_debug)'))
     .catch(() => {});
   if (!inb.contactId) return res.status(400).json({ error: 'contact id missing in the webhook body' });
-  if (inb.channel && !/insta|^ig$/i.test(inb.channel)) return res.json({ ok: true, ignored: 'not an Instagram message' });
+  if (inb.channel) {
+    const ch = channelOf(inb.channel) || (/^ig$/i.test(inb.channel) ? 'instagram' : '');
+    if (!ch || (ch === 'whatsapp' && !waSettings().enabled)) return res.json({ ok: true, ignored: 'channel not handled' });
+  }
   const key = inb.messageId || `${inb.contactId}:${sha(inb.text)}:${Math.floor(Date.now() / 60000)}`;
   const rows = await q(
     `insert into inquiries (dedupe_key, contact_id, contact_name, conversation_id, guest_message, status) values ($1,$2,$3,$4,$5,'new') on conflict (dedupe_key) do nothing returning id`,
@@ -239,12 +284,15 @@ async function webhook(req, res) {
 }
 
 export function agentPublic(app) {
-  // Public (secret in header or ?token=): GHL workflow webhook for new Instagram messages.
+  // Public (secret in header or ?token=): GHL workflow webhook for new Instagram and WhatsApp messages.
   app.post('/agent/webhook', (req, res, next) => webhook(req, res).catch(next));
 }
 
 export function agentPrivate(app, needDb, ah) {
-  app.get('/agent/status', ah(async (_req, res) => res.json({ ...agentConfig(), notify_configured: notifyConfigured() })));
+  app.get('/agent/status', ah(async (_req, res) => {
+    const wa = waSettings();
+    res.json({ ...agentConfig(), notify_configured: notifyConfigured(), whatsapp: { enabled: wa.enabled, number_set: Boolean(wa.number), auto_send: wa.autoSend } });
+  }));
 
   // How Lea answers (always approve, always automatic, time window), set in the SM Manager.
   app.get('/agent/settings', needDb, ah(async (_req, res) => {
@@ -269,9 +317,10 @@ export function agentPrivate(app, needDb, ah) {
   app.get('/agent/inquiries', needDb, ah(async (req, res) => {
     await ensureSchema();
     const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const cols = 'id, created_at, updated_at, channel, contact_name, guest_message, draft, needs_human, reason, intent, language, status, error, auto_sent';
     const rows = req.query.status
-      ? await q('select id, created_at, updated_at, contact_name, guest_message, draft, needs_human, reason, intent, language, status, error, auto_sent from inquiries where status = $1 order by id desc limit $2', [req.query.status, limit])
-      : await q('select id, created_at, updated_at, contact_name, guest_message, draft, needs_human, reason, intent, language, status, error, auto_sent from inquiries order by id desc limit $1', [limit]);
+      ? await q(`select ${cols} from inquiries where status = $1 order by id desc limit $2`, [req.query.status, limit])
+      : await q(`select ${cols} from inquiries order by id desc limit $1`, [limit]);
     res.json({ inquiries: rows });
   }));
 
@@ -306,11 +355,12 @@ export function agentPrivate(app, needDb, ah) {
     processInquiry(Number(req.params.id)).catch(() => {}); // never automatic: a person asked for a new draft
   }));
 
-  // Try the agent on a typed message. Stores nothing and sends nothing.
+  // Try the agent on a typed message. Stores nothing and sends nothing. body.channel 'whatsapp' tries the WhatsApp prompt and links.
   app.post('/agent/test', needDb, ah(async (req, res) => {
     const message = String(req.body?.message || '').trim();
     if (!message) throw new HttpError(400, 'message is required');
-    const result = await runAgent({ system: systemPrompt(today()), userText: transcript([], message), tools: TOOLS, callModel, execute });
+    const channel = req.body?.channel === 'whatsapp' ? 'whatsapp' : 'instagram';
+    const result = await runAgent({ system: promptFor(channel), userText: transcript([], message), tools: TOOLS, callModel, execute: executeFor(channel) });
     res.json(result);
   }));
 
