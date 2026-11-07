@@ -20,10 +20,15 @@ import { lowestNightly, allBlockedRanges, priceString, priceLabel, roundPrice, c
 //           without any price or rate is not sent; its item at Meta stays as it is.
 //   link    booking page of the villa with utm_source=whatsapp
 //   labels  custom_label_0 type (villa, apartment, shared villa), 1 area, 2 size band: for the collections and for catalog ads
-//   collections  product sets (PRODUCT_SETS in the core file), created or updated after each sync
+//   collections  product sets (PRODUCT_SETS in the core file), created when they are missing
 // Besides the single villas there are products that stand for several units: the apartment categories and the shared villa
 // Merapi (SPECIAL below). A unit-based product is sold out only when every unit is blocked; its price is the lowest over the units.
 // Preview first (nothing is written), then sync. A sync runs about every 6 hours when WA_CATALOG_AUTO=on and a catalog exists.
+//
+// Only what changed goes to Meta. Meta checks a product again when its title, text or photos change, and while a product is in
+// that check it is not shown in the WhatsApp catalog. So a normal run sends only the fields that differ from the last run
+// (usually price and availability), a product that did not change is not sent, and photos are set again only when they changed
+// or the last attempt failed. A full send (every field of every product) is POST /wa-catalog/sync?full=1.
 
 const DAY = 86400000;
 const SYNC_EVERY_MS = 6 * 3600 * 1000;
@@ -386,7 +391,7 @@ async function setExtraImages(catalog, retailerId, urls) {
   await graph('POST', itemId, { additional_image_urls: urls });
 }
 
-/** The collections (product sets) of the catalog: created when missing, the filter set again when they exist. Returns the problems, if any. */
+/** The collections (product sets) of the catalog: the ones that are missing are created, existing ones are left as they are. Returns the problems, if any. */
 async function ensureProductSets(catalog) {
   const notes = [];
   let byName = new Map();
@@ -397,10 +402,9 @@ async function ensureProductSets(catalog) {
     return [`collections not checked (${String(e.message || e).slice(0, 150)})`];
   }
   for (const s of PRODUCT_SETS) {
-    const filter = { [`custom_label_${s.label}`]: { eq: s.value } };
+    if (byName.has(s.name)) continue;
     try {
-      if (byName.has(s.name)) await graph('POST', byName.get(s.name), { filter });
-      else await graph('POST', `${catalog}/product_sets`, { name: s.name, filter });
+      await graph('POST', `${catalog}/product_sets`, { name: s.name, filter: { [`custom_label_${s.label}`]: { eq: s.value } } });
     } catch (e) {
       notes.push(`collection "${s.name}" not set (${String(e.message || e).slice(0, 150)})`);
     }
@@ -409,10 +413,32 @@ async function ensureProductSets(catalog) {
 }
 
 /**
+ * What to send for one product. A new product (or force) goes with every field. A known product goes with the fields that differ
+ * from the last send; nothing differs means nothing is sent. Photos are set again only when they changed or the last try failed.
+ * old is the stored payload of the last send (it also carries __photos, the photo list, and __photosOk, whether the extra photos were set).
+ */
+export function planItem(item, old, force = false) {
+  const photos = JSON.stringify([item.payload.image_link, ...item.extraImages]);
+  if (!old || force) return { data: item.payload, changed: Object.keys(item.payload), send: true, photos, needExtras: true };
+  const { __photos, __photosOk, ...before } = old;
+  const data = { id: item.retailerId };
+  const changed = [];
+  for (const [k, v] of Object.entries(item.payload)) {
+    if (JSON.stringify(v) !== JSON.stringify(before[k])) {
+      data[k] = v;
+      changed.push(k);
+    }
+  }
+  // A row stored before this logic has no photo record: it counts as set (the photos were checked by hand).
+  const needExtras = __photosOk === false || (__photos !== undefined && __photos !== photos);
+  return { data, changed, send: changed.length > 0, photos, needExtras };
+}
+
+/**
  * Build the products and either show them (dryRun, nothing is written) or send them to the catalog in one batch.
  * A villa that cannot be built is left out and listed under errors; the rest is still sent.
  */
-export async function syncCatalog({ dryRun = false } = {}) {
+export async function syncCatalog({ dryRun = false, force = false } = {}) {
   await ensureTables();
   const catalog = await catalogId();
   const built = await buildAll();
@@ -420,33 +446,49 @@ export async function syncCatalog({ dryRun = false } = {}) {
   if (!catalog) throw new HttpError(409, 'There is no catalog yet. Create it first (POST /wa-catalog/create).');
   if (!built.items.length) throw new HttpError(409, `Nothing to send: ${built.errors.map((e) => `${e.villa}: ${e.error}`).join(' | ') || 'no villas configured'}`);
 
-  const r = await graph('POST', `${catalog}/items_batch`, { item_type: 'PRODUCT_ITEM', allow_upsert: true, requests: built.items.map((i) => ({ method: 'UPDATE', data: i.payload })) });
-  const handle = r.handles?.[0] ?? null;
-  const batch = handle ? batchSummary(await waitBatch(catalog, handle)) : { status: 'no_handle', errorsTotal: 0, warningsTotal: 0, errors: [] };
+  const before = new Map((await q('select retailer_id, payload from wa_catalog_items')).map((r) => [r.retailer_id, r.payload || null]));
+  const plan = built.items.map((i) => ({ i, ...planItem(i, before.get(i.retailerId) || null, force), prev: before.get(i.retailerId) || null }));
+  const toSend = plan.filter((p) => p.send);
 
-  const extras = [];
-  for (const i of built.items) {
+  let handle = null;
+  let batch = { status: 'finished', errorsTotal: 0, warningsTotal: 0, errors: [] };
+  if (toSend.length) {
+    const r = await graph('POST', `${catalog}/items_batch`, { item_type: 'PRODUCT_ITEM', allow_upsert: true, requests: toSend.map((p) => ({ method: 'UPDATE', data: p.data })) });
+    handle = r.handles?.[0] ?? null;
+    batch = handle ? batchSummary(await waitBatch(catalog, handle)) : { status: 'no_handle', errorsTotal: 0, warningsTotal: 0, errors: [] };
+  }
+
+  const notes = [];
+  for (const p of plan) {
+    p.extrasOk = p.prev?.__photosOk !== false;
+    if (!p.needExtras) continue;
     try {
-      await setExtraImages(catalog, i.retailerId, i.extraImages);
+      await setExtraImages(catalog, p.i.retailerId, p.i.extraImages);
+      p.extrasOk = true;
     } catch (e) {
-      extras.push(`${i.retailerId}: extra photos not set (${String(e.message || e).slice(0, 150)}), the next sync tries again`);
+      p.extrasOk = false;
+      notes.push(`${p.i.retailerId}: extra photos not set (${String(e.message || e).slice(0, 150)}), the next sync tries again`);
     }
   }
-  extras.push(...(await ensureProductSets(catalog)));
+  const unchanged = plan.length - toSend.length;
+  if (unchanged) notes.push(`${unchanged} of ${plan.length} products did not change and were not sent`);
+  notes.push(...(await ensureProductSets(catalog)));
 
-  for (const i of built.items) {
+  for (const p of plan) {
+    const i = p.i;
     const bad = batch.errors.some((e) => e.startsWith(i.retailerId));
+    const stored = { ...i.payload, __photos: p.photos, __photosOk: p.extrasOk };
     await q(
       `insert into wa_catalog_items (retailer_id, property_key, price, currency, availability, free_nights, payload, status, error, handle, synced_at)
        values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10, now())
        on conflict (retailer_id) do update set property_key = excluded.property_key, price = excluded.price, currency = excluded.currency, availability = excluded.availability, free_nights = excluded.free_nights,
          payload = excluded.payload, status = excluded.status, error = excluded.error, handle = excluded.handle, synced_at = now()`,
-      [i.retailerId, i.propertyKey, i.price, i.currency, i.availability, i.freeNights, JSON.stringify(i.payload), bad ? 'error' : batch.status === 'finished' ? 'ok' : batch.status, bad ? batch.errors.filter((e) => e.startsWith(i.retailerId)).join('; ').slice(0, 400) : null, handle]
+      [i.retailerId, i.propertyKey, i.price, i.currency, i.availability, i.freeNights, JSON.stringify(stored), bad ? 'error' : p.send ? (batch.status === 'finished' ? 'ok' : batch.status) : 'ok', bad ? batch.errors.filter((e) => e.startsWith(i.retailerId)).join('; ').slice(0, 400) : null, p.send ? handle : null]
     );
   }
-  const summary = { at: new Date().toISOString(), sent: built.items.length, status: batch.status, batchErrors: batch.errorsTotal, villaErrors: built.errors.length };
+  const summary = { at: new Date().toISOString(), sent: built.items.length, changed: toSend.length, status: batch.status, batchErrors: batch.errorsTotal, villaErrors: built.errors.length };
   await setState('lastSync', summary);
-  const result = { catalogId: catalog, ...summary, items: built.items.map(view), errors: built.errors, batch, notes: extras };
+  const result = { catalogId: catalog, ...summary, items: built.items.map(view), errors: built.errors, batch, notes };
   await setState('lastResult', result);
   return result;
 }
@@ -454,14 +496,14 @@ export async function syncCatalog({ dryRun = false } = {}) {
 // The sync takes a while (Meta processes the batch), longer than a screen should wait. It runs in the background; the screen
 // asks for the state (run, lastResult). A run that is marked running for more than 10 minutes is taken as dead (restart).
 let running = false;
-export async function startSync() {
+export async function startSync(options = {}) {
   await ensureTables();
   if (!(await catalogId())) throw new HttpError(409, 'There is no catalog yet. Create it first.');
   const run = await getState('syncRun');
   if (running || (run?.running && Date.now() - Date.parse(run.since) < 10 * 60 * 1000)) throw new HttpError(409, 'A sync is already running');
   running = true;
   await setState('syncRun', { running: true, since: new Date().toISOString() });
-  syncCatalog()
+  syncCatalog(options)
     .then(() => setState('syncRun', { running: false, finishedAt: new Date().toISOString() }))
     .catch((e) => {
       console.error('WhatsApp catalog sync failed:', e.message);
@@ -471,7 +513,7 @@ export async function startSync() {
     .finally(() => {
       running = false;
     });
-  return { started: true };
+  return { started: true, full: Boolean(options.force) };
 }
 
 /** What the screen shows: settings (never secrets), the catalog and the state of each item. */
@@ -511,5 +553,5 @@ export function waCatalogRoutes(app, needDb, ah) {
   app.post('/wa-catalog/create', needDb, ah(async (_req, res) => res.json(await createCatalog())));
   app.post('/wa-catalog/connect', needDb, ah(async (_req, res) => res.json(await connectCatalog())));
   app.post('/wa-catalog/preview', needDb, ah(async (_req, res) => res.json(await syncCatalog({ dryRun: true }))));
-  app.post('/wa-catalog/sync', needDb, ah(async (_req, res) => res.status(202).json(await startSync())));
+  app.post('/wa-catalog/sync', needDb, ah(async (req, res) => res.status(202).json(await startSync({ force: String(req.query.full || '') === '1' }))));
 }
