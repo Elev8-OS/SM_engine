@@ -16,8 +16,10 @@ import { convertAmount } from './wacatalog-core.js';
 //    allows. If a benefit is too dear for a short stay, the engine asks for a longer minimum stay; if even seven nights are not
 //    enough, it does not offer it. Several promotions can run at the same time, up to PROMO_MAX_PER_VILLA (4) per property, as long
 //    as they give different things. Villas that get the same benefit share ONE code that names it (LATECHECKOUT, FREEMASSAGE), so
-//    Elev8 does not fill up with one code per villa. A proposal is a draft with its reasoning. With PROMO_AUTOPILOT=on the engine
-//    switches its proposals on by itself; otherwise a person switches a proposal on in the SM Manager.
+//    Elev8 does not fill up with one code per villa. This works only for villas that offer exactly the same service in Elev8 (the
+//    same upsell id): a code names one service by its id, and villas often have their own copy of a service with the same name.
+//    A proposal is a draft with its reasoning. With PROMO_AUTOPILOT=on the engine switches its proposals on by itself; otherwise a
+//    person switches a proposal on in the SM Manager.
 // 3. Writing. When a proposal is switched on, the engine creates the code in Elev8 (create_promo_code, for all villas of the code at
 //    once) and checks that it arrived. From then on it is a mirrored promotion. Elev8 offers no tool to change or switch off a code,
 //    so the engine never does: that is done in Elev8.
@@ -383,9 +385,10 @@ export function groupPicks(picks) {
   const groups = new Map();
   for (const p of picks) {
     const minNights = stepNights(p.minNights);
-    // Same benefit, same minimum stay, same service in Elev8: one code. The runtimes of the villas differ by a few days only,
-    // so the code takes the widest of them (it costs nothing extra, the cost is per booking).
-    const k = [p.benefit, minNights ?? '', p.resolved.raw_name, p.resolved.raw_item].join('|');
+    // Same benefit, same minimum stay, and exactly the same service in Elev8 (same upsell id and item id; villas often have their own
+    // copy of a service with the same name, and Elev8 takes one id per code): one code. The runtimes of the villas differ by a few
+    // days only, so the code takes the widest of them (it costs nothing extra, the cost is per booking).
+    const k = [p.benefit, minNights ?? '', p.resolved.upsell_id, p.resolved.item_id].join('|');
     const g = groups.get(k) || { benefit: p.benefit, resolved: p.resolved, minNights, stay_from: p.stay_from, stay_to: p.stay_to, book_until: p.book_until, keys: [], names: [], picks: [], listings: [] };
     if (p.stay_from && (!g.stay_from || p.stay_from < g.stay_from)) g.stay_from = p.stay_from;
     if (p.stay_to && (!g.stay_to || p.stay_to > g.stay_to)) g.stay_to = p.stay_to;
@@ -404,8 +407,8 @@ const UNITS = { apartments: { query: 'apartment', test: /apartment/i }, merapi: 
 
 /**
  * The service in Elev8 behind a benefit for a property, or null. Only guest-facing services count (not the internal ones).
- * A villa is one listing in Elev8. The apartments and the shared villa are several: then every unit must offer the service, with
- * the same name and item, because the code names the service by its name for all of them.
+ * A villa is one listing in Elev8. The apartments and the shared villa are several: then every unit must offer the very same
+ * service (same upsell id and item id), because a code names one service by its id.
  * cache: a Map that keeps the services of a property for one planner round (the answer of Elev8 is large).
  */
 export async function resolveBenefit(key, benefit, cache = new Map()) {
@@ -425,12 +428,9 @@ export async function resolveBenefit(key, benefit, cache = new Map()) {
   const hits = ids.map((id) => rows.find((x) => x.listing_id === id && offers(x)));
   if (hits.some((h) => !h)) return null;
   const h0 = hits[0];
-  if (multi && !hits.every((h) => String(h.upsell_name).trim() === String(h0.upsell_name).trim() && String(h.item_title).trim() === String(h0.item_title).trim())) return null;
+  if (multi && !hits.every((h) => h.upsell_id === h0.upsell_id && h.item_id === h0.item_id)) return null;
   return {
     listings: ids,
-    // one listing: the ids, which are exact. Several: the names, which are the same for all of them.
-    upsell: multi ? h0.upsell_name : h0.upsell_id,
-    upsell_item: multi ? h0.item_title : h0.item_id,
     upsell_name: String(h0.upsell_name).trim(),
     item_title: String(h0.item_title).trim(),
     raw_name: String(h0.upsell_name),
@@ -621,7 +621,7 @@ export async function activatePromo(id, { ensureSchema }) {
   if (!BENEFITS[spec.benefit]) throw new Error('The proposal has no benefit');
   if (p.book_until && p.book_until < today()) throw new Error('The last booking day has passed');
   const siblings = p.code ? await q("select id, property_key from promos where source = 'engine' and status = 'draft' and code = $1 order by id", [p.code]) : [{ id: p.id, property_key: p.property_key }];
-  // Checked again now: the service must still exist for every villa in Elev8, and be the same one for all of them.
+  // Checked again now: the service must still exist for every villa in Elev8, and be the very same one for all of them.
   const cache = new Map();
   const all = [];
   for (const sb of siblings) {
@@ -629,7 +629,7 @@ export async function activatePromo(id, { ensureSchema }) {
     if (!r) throw new Error(`The benefit ${spec.benefit} is not available for ${sb.property_key} in Elev8 any more`);
     all.push(r);
   }
-  if (!all.every((r) => r.raw_name === all[0].raw_name && r.raw_item === all[0].raw_item)) throw new Error('The villas do not offer exactly the same service in Elev8 any more');
+  if (!all.every((r) => r.upsell_id === all[0].upsell_id && r.item_id === all[0].item_id)) throw new Error('The villas do not offer exactly the same service in Elev8 any more');
   const listings = [...new Set(all.flatMap((r) => r.listings))];
   const resolved = { ...all[0], listings };
   const { elev8Tool } = await import('./agent/clients.js');
@@ -644,9 +644,9 @@ export async function activatePromo(id, { ensureSchema }) {
     discount_amount: 0,
     percentage_discount: 0,
     currency: '',
-    // one listing: the ids, which are exact. Several: the names, which are the same for all of them.
-    upsell: listings.length > 1 ? resolved.raw_name : resolved.upsell_id,
-    upsell_item: listings.length > 1 ? resolved.raw_item : resolved.item_id,
+    // the ids are exact; the villas of this code share this one service
+    upsell: resolved.upsell_id,
+    upsell_item: resolved.item_id,
     listings,
     quota: spec.quota || QUOTA,
     quota_per_user: spec.perGuest || PER_GUEST,
