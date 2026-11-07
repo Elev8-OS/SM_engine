@@ -23,6 +23,7 @@ import { adsLiveRoutes, startAdsMonitor } from './ads-live.js';
 import { adsAuditRoutes } from './adsaudit.js';
 import { outreachRoutes } from './outreach.js';
 import { waCatalogRoutes, startWaCatalogSync } from './wacatalog.js';
+import { recreateRoutes } from './wacatalog-recreate.js';
 
 const app = express();
 app.use(express.json({ limit: '60mb' }));
@@ -227,6 +228,7 @@ adsLiveRoutes(app, needDb, ah);
 adsAuditRoutes(app, needDb, ah);
 outreachRoutes(app, ah);
 waCatalogRoutes(app, needDb, ah);
+recreateRoutes(app, needDb, ah);
 
 app.use((err, _req, res, _next) => {
   if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
