@@ -21,18 +21,27 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const RED = '#D7261E';
 const WORDS = 'SPECIAL OFFER';
 
-/** The photo with the badge in the top left corner (JPEG buffer). Pure image work, no network. */
+/**
+ * The photo with the badge (JPEG buffer). Pure image work, no network.
+ * WhatsApp shows the main photo as a SQUARE cut from the middle (a landscape photo loses its left and right edge, a portrait photo its
+ * top and bottom), so the badge sits inside that middle square, at its top left, and is sized by the square, not by the photo.
+ */
 export async function badgeImage(buf, text = WORDS) {
   const base = await sharp(buf, { failOn: 'none' }).rotate().resize({ width: 1200 }).jpeg({ quality: 92 }).toBuffer({ resolveWithObject: true });
   const W = base.info.width;
   const H = base.info.height;
-  const fs = Math.round(W * 0.05);
+  const S = Math.min(W, H);
+  const ox = Math.round((W - S) / 2);
+  const oy = Math.round((H - S) / 2);
+  const fs = Math.round(S * 0.058);
   const padX = Math.round(fs * 0.75);
   const padY = Math.round(fs * 0.5);
   const bw = Math.round(text.length * fs * 0.68) + padX * 2;
   const bh = fs + padY * 2;
-  const m = Math.round(W * 0.04);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><rect x="${m}" y="${m}" width="${bw}" height="${bh}" rx="${Math.round(bh * 0.2)}" fill="${RED}"/><text x="${m + bw / 2}" y="${Math.round(m + bh / 2 + fs * 0.35)}" font-family="Inter, 'DejaVu Sans', sans-serif" font-size="${fs}" font-weight="700" fill="#FFFFFF" text-anchor="middle" letter-spacing="1">${text}</text></svg>`;
+  const m = Math.round(S * 0.05);
+  const x = ox + m;
+  const y = oy + m;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><rect x="${x}" y="${y}" width="${bw}" height="${bh}" rx="${Math.round(bh * 0.2)}" fill="${RED}"/><text x="${x + bw / 2}" y="${Math.round(y + bh / 2 + fs * 0.35)}" font-family="Inter, 'DejaVu Sans', sans-serif" font-size="${fs}" font-weight="700" fill="#FFFFFF" text-anchor="middle" letter-spacing="1">${text}</text></svg>`;
   return sharp(base.data).composite([{ input: Buffer.from(svg) }]).jpeg({ quality: 90, mozjpeg: true }).toBuffer();
 }
 
