@@ -111,6 +111,7 @@ export async function reviewCatalog() {
  * drop the product from its list for a while (the product stays "published" at Meta).
  *   price      the price goes up by 10,000 IDR (the next normal sync sets the real price again)
  *   description  only the text: the USD figure in it goes up by one (the next normal sync sets the real text again)
+ *   restore    price, text and label go back to the stored copy of the engine (after a test)
  *   label_off  custom_label_3 is emptied (the offer label)
  *   label_on   custom_label_3 is set to "offer" again
  * The stored copy of the engine is not changed, so a normal sync does not know about it: put the label back with label_on.
@@ -131,9 +132,16 @@ export async function touchProduct(key, change) {
     const d = String(row.payload?.description || '');
     if (!/about USD \d+/.test(d)) throw new HttpError(409, 'The stored text has no USD figure to change');
     data.description = d.replace(/about USD (\d+)/, (_m, n) => `about USD ${Number(n) + 1}`);
+  } else if (change === 'restore') {
+    // what the engine believes Meta holds (the stored copy): price, text and the label go back to it
+    const st = row.payload || {};
+    if (!st.price || !st.description) throw new HttpError(409, 'The stored copy is incomplete');
+    data.price = st.price;
+    data.description = st.description;
+    data.custom_label_3 = st.custom_label_3 || '';
   } else if (change === 'label_off') data.custom_label_3 = '';
   else if (change === 'label_on') data.custom_label_3 = 'offer';
-  else throw new HttpError(400, 'change must be price, description, label_off or label_on');
+  else throw new HttpError(400, 'change must be price, description, restore, label_off or label_on');
   const r = await graph('POST', `${catalog}/items_batch`, { item_type: 'PRODUCT_ITEM', requests: [{ method: 'UPDATE', data }] });
   const status = await waitFinished(catalog, r.handles?.[0] ?? null);
   return { at: new Date().toISOString(), villa: key, product: row.retailer_id, change, sent: Object.keys(data).filter((k) => k !== 'id'), status };

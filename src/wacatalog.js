@@ -34,6 +34,10 @@ import { lowestNightly, allBlockedRanges, priceString, priceLabel, roundPrice, c
 // or the last attempt failed. A full send (every field of every product) is POST /wa-catalog/sync?full=1.
 // GET /wa-catalog/inspect reads what Meta holds for each product (diagnosis, changes nothing).
 //
+// Calm sending (see syncCatalog): tests on 7 November showed that a change of one field of one product (price, text or label) does
+// not take a product out of the WhatsApp list, but a send of ten products and a new product in one run did, for about two hours.
+// So a run sends at most WA_CATALOG_MAX_PER_RUN products (default 3) and a product that only moved a little in price waits.
+//
 // Experiment: WhatsApp shows only the main photo although Meta holds all ten. WA_CATALOG_IMAGES_ONE_STEP lists the products
 // (keys, comma separated) whose photos are sent differently: additional_image_link goes into the batch together with the main
 // photo, and the extra photos are set together with the main photo in ONE call (image_url + additional_image_urls).
@@ -482,6 +486,27 @@ export async function syncCatalog({ dryRun = false, force = false } = {}) {
 
   const before = new Map((await q('select retailer_id, payload from wa_catalog_items')).map((r) => [r.retailer_id, r.payload || null]));
   const plan = built.items.map((i) => ({ i, ...planItem(i, before.get(i.retailerId) || null, force), prev: before.get(i.retailerId) || null }));
+
+  // Calm sending. WhatsApp takes products out of its list for a while when many of them change at once (seen after a send of ten
+  // products and a new product in one run), and it lists the most recently changed product first. So a product that only moved a
+  // little in price (and nothing else) waits (WA_CATALOG_PRICE_STEP, default 5 %), and at most WA_CATALOG_MAX_PER_RUN products are
+  // sent per run (default 3, availability changes first). What waits is not stored as sent, so the next run still sees the difference.
+  // A full send (force) sends everything.
+  const priceNum = (v) => Number(String(v || '').split(' ')[0]);
+  const stepEnv = process.env.WA_CATALOG_PRICE_STEP;
+  const step = stepEnv !== undefined && stepEnv !== '' && Number(stepEnv) >= 0 ? Number(stepEnv) : 0.05;
+  const maxPerRun = Number(process.env.WA_CATALOG_MAX_PER_RUN) > 0 ? Math.floor(Number(process.env.WA_CATALOG_MAX_PER_RUN)) : 3;
+  if (!force) {
+    for (const p of plan) {
+      if (!p.send || !p.prev) continue;
+      const small = p.changed.every((k) => k === 'price' || k === 'description');
+      const a = priceNum(p.prev.price);
+      const b = priceNum(p.i.payload.price);
+      if (small && a > 0 && b > 0 && Math.abs(b - a) / a < step) Object.assign(p, { send: false, needExtras: false, waiting: true });
+    }
+    const due = plan.filter((p) => p.send).sort((x, y) => Number(y.changed.includes('availability')) - Number(x.changed.includes('availability')));
+    for (const p of due.slice(maxPerRun)) Object.assign(p, { send: false, needExtras: false, waiting: true });
+  }
   const toSend = plan.filter((p) => p.send);
 
   let handle = null;
@@ -507,11 +532,14 @@ export async function syncCatalog({ dryRun = false, force = false } = {}) {
       notes.push(`${p.i.retailerId}: extra photos not set (${String(e.message || e).slice(0, 150)}), the next sync tries again`);
     }
   }
-  const unchanged = plan.length - toSend.length;
+  const waiting = plan.filter((p) => p.waiting).length;
+  const unchanged = plan.length - toSend.length - waiting;
   if (unchanged) notes.push(`${unchanged} of ${plan.length} products did not change and were not sent`);
+  if (waiting) notes.push(`${waiting} products wait for a later run (a small price move, or more than ${maxPerRun} products due in this run)`);
   notes.push(...(await ensureProductSets(catalog)));
 
   for (const p of plan) {
+    if (p.waiting) continue; // not sent: the stored copy stays as it was, so the next run sees the difference
     const i = p.i;
     const bad = batch.errors.some((e) => e.startsWith(i.retailerId));
     const stored = { ...i.payload, __photos: p.photos, __photosOk: p.extrasOk };
