@@ -14,7 +14,8 @@ import { lowestNightly, allBlockedRanges, priceString, priceLabel, roundPrice, c
 //   price   lowest nightly price over the next 90 days on free nights: PriceLabs (the price pushed to the channels), free
 //           nights from Elev8. Shown in IDR (WA_CATALOG_CURRENCY): the CHF price is converted with the ECB rate of the day and
 //           rounded to 10,000 IDR. A property that is fully booked shows its PriceLabs base price, is marked "out of stock" and
-//           says so in the text. A property without any price or rate is not sent; its item at Meta stays as it is.
+//           says "Currently not available." in the text (otherwise "Dates available."). A property without any price or rate
+//           is not sent; its item at Meta stays as it is.
 //   link    booking page of the villa with utm_source=whatsapp
 // Besides the single villas there are products that stand for several units: the apartment categories and the shared villa
 // Merapi (SPECIAL below). A unit-based product is sold out only when every unit is blocked; its price is the lowest over the units.
@@ -273,7 +274,8 @@ export async function buildProduct(prop, settings, special = null) {
   const p = withFacts(prop);
   const availability = soldOut ? 'out of stock' : 'in stock';
   const link = productUrl(prop.url, key);
-  const fromLine = `From ${priceLabel(price, currency)} per night.${soldOut ? ' Currently fully booked.' : ''}`;
+  // "Dates available" says there are free nights in the next 90 days, not that a given date is free.
+  const fromLine = `From ${priceLabel(price, currency)} per night. ${soldOut ? 'Currently not available.' : 'Dates available.'}`;
   return {
     retailerId,
     propertyKey: key,
