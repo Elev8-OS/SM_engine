@@ -3,9 +3,11 @@ import { HttpError } from './util.js';
 import { factsFor } from './facts.js';
 import { cleanPromo, problem, isLive, matchGaps, suggest } from './promo-rules.js';
 import { competitorRoutes } from './competitors.js';
+import { startPromoMirror, runMirror, lastMirror } from './promo-elev8.js';
 
-// Promotions ("Aktionen"): codes created by hand in Elev8. The team enters the code and its terms in the SM Manager,
-// the post generator and Lea use only what is active here. Writing codes into Elev8 by API comes later.
+// Promotions ("Aktionen"): codes with their terms. The codes are created in Elev8 and mirrored here by promo-elev8.js (as drafts, a person
+// switches them on); codes entered by hand here stay as they are. The post generator, the WhatsApp catalog and Lea use only what is
+// active here. Nothing is written into Elev8 by the engine yet.
 
 let ready = null;
 export function ensurePromoSchema() {
@@ -60,13 +62,23 @@ async function checkVilla(key) {
   if (!rows.length) throw new HttpError(400, `Unknown villa '${key}'`);
 }
 
+// What a promotion that comes from Elev8 keeps from Elev8: change these there.
+const ELEV8_FIELDS = ['property_key', 'title', 'code', 'terms', 'stay_from', 'stay_to', 'book_until', 'min_nights'];
+
 export function promoRoutes(app, needDb, ah) {
+  // Mirror of the codes of Elev8: first run shortly after the start, then every hour.
+  startPromoMirror({ ensureSchema: ensurePromoSchema });
+
   app.get('/promos', needDb, ah(async (_req, res) => {
     await ensurePromoSchema();
     const day = today();
     const rows = await q(`select ${COLS} from promos order by (status = 'active') desc, id desc limit 200`);
     res.json({ today: day, promos: rows.map((p) => ({ ...p, live: isLive(p, day) })) });
   }));
+
+  // The last run of the mirror of Elev8 codes, and a run on demand.
+  app.get('/promos/mirror', needDb, ah(async (_req, res) => res.json(lastMirror() || { at: null, note: 'No run since the start yet' })));
+  app.post('/promos/mirror', needDb, ah(async (_req, res) => res.json(await runMirror({ ensureSchema: ensurePromoSchema }))));
 
   // Ideas from the open nights in Elev8. They change nothing: the team adopts one and enters the code.
   app.get('/promos/suggestions', needDb, ah(async (req, res) => {
@@ -114,6 +126,11 @@ export function promoRoutes(app, needDb, ah) {
     } catch (e) {
       throw bad(e);
     }
+    // A promotion from Elev8: only the status and the note are changed here.
+    if (old.source === 'elev8') {
+      const changed = ELEV8_FIELDS.filter((k) => k in clean && String(clean[k] ?? '') !== String(old[k] ?? ''));
+      if (changed.length) throw new HttpError(409, `This promotion comes from Elev8 (code ${old.code}). Change ${changed.join(', ')} there, it follows here within the hour.`);
+    }
     const p = { ...old, ...clean };
     const err = problem(p);
     if (err) throw new HttpError(400, err);
@@ -128,8 +145,11 @@ export function promoRoutes(app, needDb, ah) {
 
   app.delete('/promos/:id', needDb, ah(async (req, res) => {
     await ensurePromoSchema();
-    await q('delete from promos where id = $1', [Number(req.params.id)]);
-    res.json({ id: Number(req.params.id), deleted: true });
+    const id = Number(req.params.id);
+    const [old] = await q('select source, code from promos where id = $1', [id]);
+    if (old?.source === 'elev8') throw new HttpError(409, `This promotion comes from Elev8 (code ${old.code}). Set it to ended instead; the mirror would bring it back as a draft.`);
+    await q('delete from promos where id = $1', [id]);
+    res.json({ id, deleted: true });
   }));
 
   // Benchmark of other providers' Instagram accounts
