@@ -1,6 +1,8 @@
 import { q, dbEnabled } from './db.js';
 import { normaliseCode, matchGaps, suggest } from './promo-rules.js';
 import { factsFor } from './facts.js';
+import { usdRates } from './fx.js';
+import { convertAmount } from './wacatalog-core.js';
 
 // Promo codes: Elev8 (the booking website) and the engine, kept in line.
 //
@@ -9,10 +11,12 @@ import { factsFor } from './facts.js';
 //    promotion cannot be changed in the SM Manager, and its status follows Elev8. Codes that are expired, switched off, used up,
 //    single-use vouchers (personal text) or look like test codes (PROMO_MIRROR_SKIP_PATTERN) are not mirrored.
 // 2. Planner. The engine proposes promotions itself, from the open nights of each property. It only offers what fits the property
-//    (a romantic package is never offered for a shared villa) and only what exists for that property in Elev8. Several promotions
-//    can run at the same time, also for one property, as long as they give different things. A proposal is a draft with its
-//    reasoning. With PROMO_AUTOPILOT=on the engine switches its proposals on by itself, within limits; otherwise a person
-//    switches a proposal on in the SM Manager.
+//    (a romantic package is never offered for a shared villa), only what exists for that property in Elev8, and only what is
+//    affordable: the cost of the benefit may not be more than PROMO_MAX_COST_SHARE (10 %) of the cheapest booking the promotion
+//    allows. If a benefit is too dear for a short stay, the engine asks for a longer minimum stay; if even seven nights are not
+//    enough, it does not offer it. Several promotions can run at the same time, up to PROMO_MAX_PER_VILLA (4) per property, as long
+//    as they give different things. A proposal is a draft with its reasoning. With PROMO_AUTOPILOT=on the engine switches its
+//    proposals on by itself; otherwise a person switches a proposal on in the SM Manager.
 // 3. Writing. When a proposal is switched on, the engine creates the code in Elev8 (create_promo_code) and checks that it
 //    arrived. From then on it is a mirrored promotion. Elev8 offers no tool to change or switch off a code, so the engine never
 //    does: that is done in Elev8.
@@ -22,6 +26,7 @@ const isDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
 const today = () => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
 const on = (v) => /^(true|1|yes|on)$/i.test(String(v || '').replace(/["'\s]/g, ''));
 const off = (v) => /^(off|false|0|no)$/i.test(String(v || '').replace(/["'\s]/g, ''));
+const num = (v, d) => (Number(v) > 0 ? Number(v) : d);
 
 // ---------------------------------------------------------------------------------------------------------------------------
 // Mirror of the codes of Elev8
@@ -209,9 +214,9 @@ export function groupOfText(text) {
   return '';
 }
 
-// What fits which kind of property. A romantic package does not fit a shared villa, a minibus does not fit a couple's villa.
+// What fits which kind of property, best first. A romantic package does not fit a shared villa, a minibus does not fit a couple's villa.
 export const FIT = {
-  villa_small: ['romantic', 'spa', 'breakfast', 'early_checkin', 'late_checkout', 'transfer_car'], // up to 4 guests
+  villa_small: ['romantic', 'spa', 'breakfast', 'late_checkout', 'early_checkin', 'transfer_car'], // up to 4 guests
   villa_large: ['transfer_van', 'late_checkout', 'early_checkin', 'spa'], // 5 guests and more
   apartment: ['early_checkin', 'late_checkout', 'spa', 'transfer_car'],
   shared: ['early_checkin', 'late_checkout', 'transfer_car']
@@ -238,7 +243,7 @@ const TYPE_REASON = {
   short_notice: 'Most nights are still open at short notice, so a small extra can tip a quick decision.',
   long_stay: 'Half of the nights are open. A transfer rewards stays of five nights or more.',
   extras: 'A third of the nights are open. A small extra helps the dates that are still free.',
-  couples: 'Many nights are open and the villa suits couples.'
+  couples: 'Many nights are open and the property suits couples.'
 };
 
 /** The text the guest reads in Elev8 (500 characters at most). */
@@ -252,13 +257,29 @@ export function guestTerms({ benefit, min_nights, stay_from, stay_to, book_until
 }
 
 /**
+ * Does a promotion pay for itself? The cost of the benefit may not be more than `share` (10 %) of the cheapest booking it allows:
+ * minNights (or `assumed` nights when there is no minimum) at the cheapest nightly rate. If it is too dear for that, the
+ * minimum stay is raised to the shortest stay where it fits; if that takes more than `cap` nights the promotion is not offered.
+ * Pure. cost and nightly in the same currency.
+ */
+export function costCheck({ cost, nightly, minNights = null, share = 0.1, assumed = 2, cap = 7 }) {
+  if (!(cost > 0) || !(nightly > 0)) return { ok: false, why: 'no price to check the cost against' };
+  const nights = minNights || assumed;
+  if (cost <= share * nightly * nights) return { ok: true, minNights, nights, ratio: cost / (nightly * nights), raised: false };
+  const need = Math.ceil(cost / (share * nightly));
+  if (need > cap) return { ok: false, why: `the cost would be more than ${Math.round(share * 100)} % of a booking up to ${cap} nights` };
+  return { ok: true, minNights: Math.max(need, minNights || 0), nights: need, ratio: cost / (nightly * need), raised: true };
+}
+
+/**
  * Proposals from the suggestions (open nights per property). Pure: no network. Several promotions may run at the same time, also
- * for one property, as long as they give different things: a benefit that a running or proposed promotion for the same dates
- * already gives (same group) is not proposed again. Only a benefit that fits the kind of property is proposed. At most
- * maxPerVilla engine promotions are open per property and maxOpen in all.
+ * for one property, up to maxPerVilla engine promotions per property and maxOpen in all, as long as they give different things:
+ * a benefit that a running or proposed promotion for the same dates already gives (same group) is not proposed again.
+ * Only a benefit that fits the kind of property is proposed. After the main idea of a property, further fitting benefits follow
+ * for the same open dates, until maxPerVilla is reached.
  * props: { key, name, guests }. existing: promotions that are not ended { property_key, source, status, stay_from, stay_to, terms }.
  */
-export function planProposals({ suggestions, props, existing, maxOpen = 6, maxPerVilla = 2 }) {
+export function planProposals({ suggestions, props, existing, maxOpen = 40, maxPerVilla = 4 }) {
   const proposals = [];
   const skipped = [];
   const live = existing.filter((p) => p.status === 'draft' || p.status === 'active');
@@ -268,11 +289,14 @@ export function planProposals({ suggestions, props, existing, maxOpen = 6, maxPe
   const offered = (key, from, to) => new Set(live.filter((p) => (p.property_key === 'all' || p.property_key === key) && overlaps(p, from, to)).map((p) => groupOfText(p.terms)).filter(Boolean));
   const roundCount = new Map();
   const roundGroups = new Map();
+  const filled = new Set();
+  const count = (key) => engineOpen(key) + (roundCount.get(key) || 0);
   for (const s of suggestions) {
     const prop = props.find((p) => p.key === s.property_key);
     if (!prop) continue;
     const kind = kindOf(prop.key, prop.guests);
-    if (engineOpen(prop.key) + (roundCount.get(prop.key) || 0) >= maxPerVilla) {
+    if (kind === 'shared' && s.type === 'couples') continue; // a shared villa is not sold to couples as a package
+    if (count(prop.key) >= maxPerVilla) {
       skipped.push(`${prop.name}: ${maxPerVilla} engine promotions are open already`);
       continue;
     }
@@ -288,26 +312,31 @@ export function planProposals({ suggestions, props, existing, maxOpen = 6, maxPe
     const already = offered(prop.key, s.stay_from, s.stay_to);
     const proposedHere = roundGroups.get(prop.key) || new Set();
     const options = fitting.filter((b) => !already.has(GROUP[b]) && !proposedHere.has(GROUP[b]));
-    if (!options.length) {
-      skipped.push(`${prop.name}: everything that fits is offered for these dates already`);
-      continue;
+    const base = { property_key: prop.key, name: prop.name, kind, stay_from: s.stay_from, stay_to: s.stay_to, book_until: s.book_until };
+    const nights = `${Math.min(s.open_nights, s.days * Math.max(s.units, 1))} of ${s.days * Math.max(s.units, 1)} nights are free in the next ${s.days} days (${Math.round(s.share * 100)} %).`;
+    if (options.length) {
+      proposedHere.add(GROUP[options[0]]);
+      roundGroups.set(prop.key, proposedHere);
+      roundCount.set(prop.key, (roundCount.get(prop.key) || 0) + 1);
+      open += 1;
+      proposals.push({ ...base, options, type: s.type, min_nights: s.min_nights, reason: `${nights} ${TYPE_REASON[s.type] || ''}`.trim() });
+    } else {
+      skipped.push(`${prop.name}: the main idea is offered for these dates already`);
     }
-    proposedHere.add(GROUP[options[0]]);
-    roundGroups.set(prop.key, proposedHere);
-    roundCount.set(prop.key, (roundCount.get(prop.key) || 0) + 1);
-    open += 1;
-    proposals.push({
-      property_key: prop.key,
-      name: prop.name,
-      kind,
-      options,
-      type: s.type,
-      stay_from: s.stay_from,
-      stay_to: s.stay_to,
-      book_until: s.book_until,
-      min_nights: s.min_nights,
-      reason: `${s.open_nights} of ${s.days * Math.max(s.units, 1)} nights are free in the next ${s.days} days (${Math.round(s.share * 100)} %). ${TYPE_REASON[s.type] || ''}`.trim()
-    });
+    // Further extras for the same dates: guests value different things, and each one is cheap.
+    if (!filled.has(prop.key)) {
+      filled.add(prop.key);
+      for (const b of FIT[kind] || []) {
+        if (count(prop.key) >= maxPerVilla || open >= maxOpen) break;
+        if (already.has(GROUP[b]) || (roundGroups.get(prop.key) || new Set()).has(GROUP[b])) continue;
+        const set = roundGroups.get(prop.key) || new Set();
+        set.add(GROUP[b]);
+        roundGroups.set(prop.key, set);
+        roundCount.set(prop.key, (roundCount.get(prop.key) || 0) + 1);
+        open += 1;
+        proposals.push({ ...base, options: [b], type: 'extras', min_nights: null, reason: `${nights} A further extra for the same open dates: guests value different things.` });
+      }
+    }
   }
   return { proposals, skipped };
 }
@@ -329,13 +358,17 @@ const UNITS = { apartments: { query: 'apartment', test: /apartment/i }, merapi: 
  * The service in Elev8 behind a benefit for a property, or null. Only guest-facing services count (not the internal ones).
  * A villa is one listing in Elev8. The apartments and the shared villa are several: then every unit must offer the service, with
  * the same name and item, because the code names the service by its name for all of them.
+ * cache: a Map that keeps the services of a property for one planner round (the answer of Elev8 is large).
  */
-export async function resolveBenefit(key, benefit) {
+export async function resolveBenefit(key, benefit, cache = new Map()) {
   const def = BENEFITS[benefit];
   if (!def) return null;
   const multi = UNITS[key];
-  const { elev8Tool } = await import('./agent/clients.js');
-  const r = await elev8Tool('get_listing_upsells', { listing_id: '', listing_name: multi ? multi.query : key, listing_tag: '' });
+  if (!cache.has(key)) {
+    const { elev8Tool } = await import('./agent/clients.js');
+    cache.set(key, elev8Tool('get_listing_upsells', { listing_id: '', listing_name: multi ? multi.query : key, listing_tag: '' }));
+  }
+  const r = await cache.get(key);
   let rows = (r?.results || []).filter((x) => x.item_status === 1);
   if (multi) rows = rows.filter((x) => multi.test.test(`${x.listing_name} ${x.internal_name}`));
   const ids = [...new Set(rows.map((x) => x.listing_id))];
@@ -357,6 +390,47 @@ export async function resolveBenefit(key, benefit) {
   };
 }
 
+// The PriceLabs listings (channex ids) of the properties that are not in PRICELABS_LISTINGS (the same ones as in wacatalog.js).
+const PL_EXTRA = {
+  bratan: ['60e9b31b-1313-45b9-9c61-13f9f5cc8cf4___7f7206ac-8595-40c4-8fca-c1394d350745'],
+  tambora: ['a34cc21d-f853-488e-ba11-a42902a6b0aa___254a15a0-f81a-45a1-8bed-60b445933f81'],
+  apartments: ['49f64992-d0c0-4566-9edf-fe7ce185f36b___78adf636-26dc-4ea6-a9b1-c0acfd17d5ae', '15a053e0-d4b8-491f-ae5b-fefcda8f8493___8c95568b-d972-40dc-99e3-4aa7c487ac86', '1ed9c430-09bd-497e-816f-ca5837296b3f___4de7f331-6ebc-44ab-bfdb-92f6f405cd1d'],
+  merapi: ['afa397b2-7857-42f2-afe7-76f44e2372a4___05e77a25-1600-48b4-b984-5369062a9d0b', 'afa397b2-7857-42f2-afe7-76f44e2372a4___d92c422a-c8af-4679-913c-adc3a0d94c74']
+};
+
+/** The cheapest nightly rate of a property in a window, in USD (what PriceLabs pushes to the channels), or null. */
+async function cheapestNightUsd(key, from, to, cache) {
+  const ck = `${key}|${from}|${to}`;
+  if (cache.has(ck)) return cache.get(ck);
+  const { priceIds, pricelabsRows } = await import('./agent/clients.js');
+  const ids = PL_EXTRA[key] || [priceIds()[key]].filter(Boolean);
+  let best = null;
+  let cur = 'CHF';
+  for (const id of ids) {
+    const r = await pricelabsRows(id, from, to);
+    cur = String(r.currency || cur).toUpperCase();
+    for (const x of r.rows || []) {
+      if (x.unbookable) continue;
+      const p = x.user_price > 0 ? x.user_price : x.price;
+      if (p > 0 && (best === null || p < best)) best = p;
+    }
+  }
+  let usd = null;
+  if (best !== null) {
+    const fx = cur === 'USD' ? { rates: {} } : await usdRates([cur]);
+    usd = convertAmount(best, cur, 'USD', fx.rates);
+  }
+  cache.set(ck, usd);
+  return usd;
+}
+
+/** What the service costs, in USD (the price of the service in Elev8 stands for the cost). */
+async function costUsd(resolved) {
+  const cur = String(resolved.currency || 'USD').toUpperCase();
+  const fx = cur === 'USD' ? { rates: {} } : await usdRates([cur]);
+  return convertAmount(Number(resolved.price), cur, 'USD', fx.rates);
+}
+
 export const autopilotOn = () => on(process.env.PROMO_AUTOPILOT);
 const QUOTA = 100;
 const PER_GUEST = 1;
@@ -366,9 +440,9 @@ let planBusy = false;
 export const lastPlan = () => lastPlanResult;
 
 /**
- * The planner: reads the open nights, proposes promotions, checks each benefit exists in Elev8, stores the proposals as drafts
- * (source engine) with their reasoning. With dry true nothing is stored. With PROMO_AUTOPILOT=on the proposals are switched on
- * at once, which creates the codes in Elev8.
+ * The planner: reads the open nights, proposes promotions, checks each benefit exists in Elev8 and pays for itself, stores the
+ * proposals as drafts (source engine) with their reasoning. With dry true nothing is stored. With PROMO_AUTOPILOT=on the
+ * proposals are switched on at once, which creates the codes in Elev8.
  */
 export async function runPlan({ ensureSchema, dry = false }) {
   if (planBusy) return { error: 'The planner is running already', ...(lastPlanResult || {}) };
@@ -384,8 +458,9 @@ export async function runPlan({ ensureSchema, dry = false }) {
     const props = (await q('select key, name, guests from properties where active order by key')).map((p) => ({ ...p, guests: factsFor(p.key)?.guestsMax ?? p.guests }));
     const suggestions = suggest(matchGaps(gaps?.results, props, days), day, days);
     const existing = await q("select property_key, source, status, stay_from::text as stay_from, stay_to::text as stay_to, terms from promos where status <> 'ended'");
-    const maxOpen = Number(process.env.PROMO_MAX_OPEN) > 0 ? Number(process.env.PROMO_MAX_OPEN) : 6;
-    const maxPerVilla = Number(process.env.PROMO_MAX_PER_VILLA) > 0 ? Number(process.env.PROMO_MAX_PER_VILLA) : 2;
+    const maxOpen = num(process.env.PROMO_MAX_OPEN, 40);
+    const maxPerVilla = num(process.env.PROMO_MAX_PER_VILLA, 4);
+    const share = num(process.env.PROMO_MAX_COST_SHARE, 0.1);
     const { proposals, skipped } = planProposals({ suggestions, props, existing, maxOpen, maxPerVilla });
     out.skipped.push(...skipped);
     const taken = new Set((await q('select upper(code) as c from promos')).map((x) => x.c));
@@ -396,30 +471,51 @@ export async function runPlan({ ensureSchema, dry = false }) {
       // without the list of Elev8 codes the planner stops: a code that exists there must not be created again
       throw new Error('The codes of Elev8 could not be read, nothing is proposed');
     }
+    const upsells = new Map();
+    const nightly = new Map();
+    const chosenGroups = new Map();
     for (const p of proposals) {
-      let chosen = null;
-      let resolved = null;
-      for (const b of p.options) {
-        resolved = await resolveBenefit(p.property_key, b);
-        if (resolved) {
-          chosen = b;
-          break;
-        }
-      }
-      if (!chosen) {
-        out.skipped.push(`${p.name}: none of ${p.options.join(', ')} exists for this property in Elev8 (for the apartments and the shared villa every unit must offer it)`);
+      const groups = chosenGroups.get(p.property_key) || new Set();
+      let pick = null;
+      let nightUsd = null;
+      try {
+        nightUsd = await cheapestNightUsd(p.property_key, p.stay_from || day, p.stay_to || day, nightly);
+      } catch (e) {
+        out.skipped.push(`${p.name}: cheapest rate not readable (${String(e.message || e).slice(0, 80)})`);
         continue;
       }
+      for (const b of p.options) {
+        if (groups.has(GROUP[b])) continue;
+        const resolved = await resolveBenefit(p.property_key, b, upsells);
+        if (!resolved) {
+          out.skipped.push(`${p.name}: ${b} does not exist for this property in Elev8 (for the apartments and the shared villa every unit must offer it)`);
+          continue;
+        }
+        const cost = await costUsd(resolved);
+        const chk = costCheck({ cost, nightly: nightUsd, minNights: p.min_nights, share });
+        if (!chk.ok) {
+          out.skipped.push(`${p.name}: ${b} is not offered, ${chk.why}`);
+          continue;
+        }
+        pick = { b, resolved, chk, cost };
+        break;
+      }
+      if (!pick) continue;
+      groups.add(GROUP[pick.b]);
+      chosenGroups.set(p.property_key, groups);
+      const { b: chosen, resolved, chk, cost } = pick;
+      const minNights = chk.minNights ?? p.min_nights ?? null;
       const code = makeCode(p.property_key, chosen, day, taken);
       taken.add(code);
-      const terms = `${BENEFITS[chosen].label}. ${guestTerms({ benefit: chosen, ...p })}`.slice(0, 1000);
-      const item = { code, property_key: p.property_key, name: p.name, benefit: chosen, label: BENEFITS[chosen].label, listings: resolved.listings.length, stay_from: p.stay_from, stay_to: p.stay_to, book_until: p.book_until, min_nights: p.min_nights, reason: `${p.reason} Offer: ${BENEFITS[chosen].label}.` };
+      const terms = `${BENEFITS[chosen].label}. ${guestTerms({ benefit: chosen, ...p, min_nights: minNights })}`.slice(0, 1000);
+      const costText = `Cost about USD ${Math.round(cost)}: ${(chk.ratio * 100).toFixed(1)} % of a ${chk.nights}-night booking at the cheapest rate (about USD ${Math.round(nightUsd * chk.nights)})${chk.raised ? `, so the minimum stay is ${minNights} nights` : ''}.`;
+      const item = { code, property_key: p.property_key, name: p.name, benefit: chosen, label: BENEFITS[chosen].label, listings: resolved.listings.length, stay_from: p.stay_from, stay_to: p.stay_to, book_until: p.book_until, min_nights: minNights, cost_usd: Math.round(cost * 100) / 100, cost_share: Math.round(chk.ratio * 1000) / 1000, reason: `${p.reason} Offer: ${BENEFITS[chosen].label}. ${costText}` };
       out.proposed.push(item);
       if (dry) continue;
       const rows = await q(
         `insert into promos (property_key, title, code, terms, stay_from, stay_to, book_until, min_nights, status, source, suggestion_id, note, spec)
          values ($1,$2,$3,$4,$5::date,$6::date,$7::date,$8,'draft','engine',null,$9,$10::jsonb) returning id`,
-        [p.property_key, `${p.name}: ${BENEFITS[chosen].label.replace(/^Complimentary /, '')}`.slice(0, 120), code, terms, p.stay_from, p.stay_to, p.book_until, p.min_nights, item.reason, JSON.stringify({ benefit: chosen, kind: p.kind, quota: QUOTA, perGuest: PER_GUEST, type: p.type })]
+        [p.property_key, `${p.name}: ${BENEFITS[chosen].label.replace(/^Complimentary /, '')}`.slice(0, 120), code, terms, p.stay_from, p.stay_to, p.book_until, minNights, item.reason.slice(0, 500), JSON.stringify({ benefit: chosen, kind: p.kind, quota: QUOTA, perGuest: PER_GUEST, type: p.type, cost_usd: item.cost_usd, cost_share: item.cost_share })]
       );
       item.id = rows[0].id;
       if (autopilotOn()) {
