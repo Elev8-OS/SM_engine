@@ -15,11 +15,12 @@ import { convertAmount } from './wacatalog-core.js';
 //    affordable: the cost of the benefit may not be more than PROMO_MAX_COST_SHARE (10 %) of the cheapest booking the promotion
 //    allows. If a benefit is too dear for a short stay, the engine asks for a longer minimum stay; if even seven nights are not
 //    enough, it does not offer it. Several promotions can run at the same time, up to PROMO_MAX_PER_VILLA (4) per property, as long
-//    as they give different things. A proposal is a draft with its reasoning. With PROMO_AUTOPILOT=on the engine switches its
-//    proposals on by itself; otherwise a person switches a proposal on in the SM Manager.
-// 3. Writing. When a proposal is switched on, the engine creates the code in Elev8 (create_promo_code) and checks that it
-//    arrived. From then on it is a mirrored promotion. Elev8 offers no tool to change or switch off a code, so the engine never
-//    does: that is done in Elev8.
+//    as they give different things. Villas that get the same benefit for the same runtime share ONE code (LATENOV, SPANOV), so
+//    Elev8 does not fill up with one code per villa. A proposal is a draft with its reasoning. With PROMO_AUTOPILOT=on the engine
+//    switches its proposals on by itself; otherwise a person switches a proposal on in the SM Manager.
+// 3. Writing. When a proposal is switched on, the engine creates the code in Elev8 (create_promo_code, for all villas of the code at
+//    once) and checks that it arrived. From then on it is a mirrored promotion. Elev8 offers no tool to change or switch off a code,
+//    so the engine never does: that is done in Elev8.
 
 const CODE_RE = /^[A-Z0-9][A-Z0-9_-]{2,23}$/;
 const isDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
@@ -341,14 +342,46 @@ export function planProposals({ suggestions, props, existing, maxOpen = 40, maxP
   return { proposals, skipped };
 }
 
-const ABBR = { early_checkin: 'EARLY', late_checkout: 'LATE', transfer_car: 'RIDE', transfer_van: 'VAN', spa: 'SPA', breakfast: 'BRKFST', romantic: 'ROMANCE' };
+const WORD = { early_checkin: 'EARLY', late_checkout: 'LATE', transfer_car: 'RIDE', transfer_van: 'VAN', spa: 'SPA', breakfast: 'BRKFST', romantic: 'ROMANCE' };
+const MONTH = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 
-/** A code that is not taken yet: VILLA-BENEFIT-MMDD, 24 characters at most. */
-export function makeCode(key, benefit, day, taken) {
-  const base = `${String(key).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8)}-${ABBR[benefit] || 'GIFT'}-${day.slice(5, 7)}${day.slice(8, 10)}`;
+/**
+ * A short code that is not taken yet. For several villas: the benefit and the month, LATENOV, SPANOV. For one villa the first
+ * letters of the villa: LATE-SWAN. If it is taken a number follows: LATENOV2.
+ */
+export function makeCode(keys, benefit, day, taken) {
+  const list = [].concat(keys);
+  const word = WORD[benefit] || 'GIFT';
+  const base = list.length === 1 ? `${word}-${String(list[0]).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4)}` : `${word}${MONTH[Number(day.slice(5, 7)) - 1] || ''}`;
   let code = base;
-  for (let i = 0; taken.has(code) && i < 20; i++) code = `${base}${String.fromCharCode(66 + i)}`;
+  for (let i = 2; taken.has(code) && i < 30; i++) code = `${base}${i}`;
   return code;
+}
+
+// Minimum stays are rounded up to 3, 5 or 7 nights, so that villas with almost the same need share one code.
+const STEPS = [3, 5, 7];
+export const stepNights = (n) => (n ? STEPS.find((s) => s >= n) ?? n : null);
+
+/**
+ * Villas that get the same benefit for the same runtime share one code. Pure.
+ * picks: { key, name, benefit, resolved, minNights, stay_from, stay_to, book_until, cost, share }.
+ * Returns groups { benefit, resolved, minNights, stay_from, stay_to, book_until, keys, names, picks }: the window is the widest
+ * of the villas, the minimum stay is the same for all (rounded up), and the villas must offer exactly the same service in Elev8.
+ */
+export function groupPicks(picks) {
+  const groups = new Map();
+  for (const p of picks) {
+    const minNights = stepNights(p.minNights);
+    const k = [p.benefit, minNights ?? '', p.stay_to ?? '', p.book_until ?? '', p.resolved.raw_name, p.resolved.raw_item].join('|');
+    const g = groups.get(k) || { benefit: p.benefit, resolved: p.resolved, minNights, stay_from: p.stay_from, stay_to: p.stay_to, book_until: p.book_until, keys: [], names: [], picks: [], listings: [] };
+    if (p.stay_from && (!g.stay_from || p.stay_from < g.stay_from)) g.stay_from = p.stay_from;
+    g.keys.push(p.key);
+    g.names.push(p.name);
+    g.picks.push(p);
+    for (const id of p.resolved.listings) if (!g.listings.includes(id)) g.listings.push(id);
+    groups.set(k, g);
+  }
+  return [...groups.values()];
 }
 
 // A property of the SM Manager that is several units in Elev8: how to find its listings.
@@ -385,6 +418,10 @@ export async function resolveBenefit(key, benefit, cache = new Map()) {
     upsell_item: multi ? h0.item_title : h0.item_id,
     upsell_name: String(h0.upsell_name).trim(),
     item_title: String(h0.item_title).trim(),
+    raw_name: String(h0.upsell_name),
+    raw_item: String(h0.item_title),
+    upsell_id: h0.upsell_id,
+    item_id: h0.item_id,
     price: h0.item_price,
     currency: h0.currency
   };
@@ -441,8 +478,9 @@ export const lastPlan = () => lastPlanResult;
 
 /**
  * The planner: reads the open nights, proposes promotions, checks each benefit exists in Elev8 and pays for itself, stores the
- * proposals as drafts (source engine) with their reasoning. With dry true nothing is stored. With PROMO_AUTOPILOT=on the
- * proposals are switched on at once, which creates the codes in Elev8.
+ * proposals as drafts (source engine) with their reasoning. Villas with the same benefit and runtime share one code: the draft
+ * has one row per villa with the same code. With dry true nothing is stored. With PROMO_AUTOPILOT=on the proposals are switched
+ * on at once, which creates the codes in Elev8.
  */
 export async function runPlan({ ensureSchema, dry = false }) {
   if (planBusy) return { error: 'The planner is running already', ...(lastPlanResult || {}) };
@@ -474,6 +512,7 @@ export async function runPlan({ ensureSchema, dry = false }) {
     const upsells = new Map();
     const nightly = new Map();
     const chosenGroups = new Map();
+    const picks = [];
     for (const p of proposals) {
       const groups = chosenGroups.get(p.property_key) || new Set();
       let pick = null;
@@ -503,24 +542,39 @@ export async function runPlan({ ensureSchema, dry = false }) {
       if (!pick) continue;
       groups.add(GROUP[pick.b]);
       chosenGroups.set(p.property_key, groups);
-      const { b: chosen, resolved, chk, cost } = pick;
-      const minNights = chk.minNights ?? p.min_nights ?? null;
-      const code = makeCode(p.property_key, chosen, day, taken);
+      picks.push({ key: p.property_key, name: p.name, kind: p.kind, type: p.type, benefit: pick.b, resolved: pick.resolved, minNights: pick.chk.minNights ?? p.min_nights ?? null, stay_from: p.stay_from, stay_to: p.stay_to, book_until: p.book_until, cost: pick.cost, nightUsd, reason: p.reason });
+    }
+    // Villas that get the same benefit for the same runtime share one code.
+    for (const g of groupPicks(picks)) {
+      const code = makeCode(g.keys, g.benefit, day, taken);
       taken.add(code);
-      const terms = `${BENEFITS[chosen].label}. ${guestTerms({ benefit: chosen, ...p, min_nights: minNights })}`.slice(0, 1000);
-      const costText = `Cost about USD ${Math.round(cost)}: ${(chk.ratio * 100).toFixed(1)} % of a ${chk.nights}-night booking at the cheapest rate (about USD ${Math.round(nightUsd * chk.nights)})${chk.raised ? `, so the minimum stay is ${minNights} nights` : ''}.`;
-      const item = { code, property_key: p.property_key, name: p.name, benefit: chosen, label: BENEFITS[chosen].label, listings: resolved.listings.length, stay_from: p.stay_from, stay_to: p.stay_to, book_until: p.book_until, min_nights: minNights, cost_usd: Math.round(cost * 100) / 100, cost_share: Math.round(chk.ratio * 1000) / 1000, reason: `${p.reason} Offer: ${BENEFITS[chosen].label}. ${costText}` };
+      const label = BENEFITS[g.benefit].label;
+      const short = label.replace(/^Complimentary /, '');
+      const nights = g.minNights || 2;
+      const costs = g.picks.map((x) => x.cost);
+      const lo = Math.round(Math.min(...costs));
+      const hi = Math.round(Math.max(...costs));
+      const worst = Math.max(...g.picks.map((x) => x.cost / (x.nightUsd * nights)));
+      const names = g.names.map((n) => n.replace(/^The R /, ''));
+      const note = `${g.keys.length > 1 ? `The same offer for ${g.keys.length} villas (${names.join(', ')}): many nights are still open at each of them.` : g.picks[0].reason} Offer: ${label}. Cost about USD ${lo}${hi > lo ? `-${hi}` : ''}, at most ${(worst * 100).toFixed(1)} % of a ${nights}-night booking at the cheapest rate${g.minNights ? `; minimum stay ${g.minNights} nights` : ''}.`;
+      const terms = `${label}. ${guestTerms({ benefit: g.benefit, min_nights: g.minNights, stay_from: g.stay_from, stay_to: g.stay_to, book_until: g.book_until })}`.slice(0, 1000);
+      const title = (g.keys.length > 1 ? `${short} (${g.keys.length} villas)` : `${g.names[0]}: ${short}`).slice(0, 120);
+      const item = { code, keys: g.keys, names: g.names, benefit: g.benefit, label, listings: g.listings.length, stay_from: g.stay_from, stay_to: g.stay_to, book_until: g.book_until, min_nights: g.minNights, cost_usd: hi, cost_share: Math.round(worst * 1000) / 1000, reason: note };
       out.proposed.push(item);
       if (dry) continue;
-      const rows = await q(
-        `insert into promos (property_key, title, code, terms, stay_from, stay_to, book_until, min_nights, status, source, suggestion_id, note, spec)
-         values ($1,$2,$3,$4,$5::date,$6::date,$7::date,$8,'draft','engine',null,$9,$10::jsonb) returning id`,
-        [p.property_key, `${p.name}: ${BENEFITS[chosen].label.replace(/^Complimentary /, '')}`.slice(0, 120), code, terms, p.stay_from, p.stay_to, p.book_until, minNights, item.reason.slice(0, 500), JSON.stringify({ benefit: chosen, kind: p.kind, quota: QUOTA, perGuest: PER_GUEST, type: p.type, cost_usd: item.cost_usd, cost_share: item.cost_share })]
-      );
-      item.id = rows[0].id;
+      const ids = [];
+      for (const x of g.picks) {
+        const rows = await q(
+          `insert into promos (property_key, title, code, terms, stay_from, stay_to, book_until, min_nights, status, source, suggestion_id, note, spec)
+           values ($1,$2,$3,$4,$5::date,$6::date,$7::date,$8,'draft','engine',null,$9,$10::jsonb) returning id`,
+          [x.key, title, code, terms, g.stay_from, g.stay_to, g.book_until, g.minNights, note.slice(0, 500), JSON.stringify({ benefit: g.benefit, kind: x.kind, quota: QUOTA, perGuest: PER_GUEST, type: x.type, keys: g.keys, cost_usd: Math.round(x.cost * 100) / 100, cost_share: Math.round(worst * 1000) / 1000 })]
+        );
+        ids.push(rows[0].id);
+      }
+      item.id = ids[0];
       if (autopilotOn()) {
         try {
-          await activatePromo(rows[0].id, { ensureSchema });
+          await activatePromo(ids[0], { ensureSchema });
           out.activated.push(code);
         } catch (e) {
           out.errors.push(`${code}: ${String(e.message || e).slice(0, 200)}`);
@@ -539,6 +593,7 @@ export async function runPlan({ ensureSchema, dry = false }) {
 
 /**
  * Switches an engine proposal on: creates the code in Elev8, checks that it arrived, and turns the promotion into a mirrored one.
+ * A code for several villas is one proposal (rows with the same code): the code is created once, for all of them.
  * Elev8 makes the code redeemable at once and has no tool to remove it, so a failure before the check leaves the proposal a draft.
  */
 export async function activatePromo(id, { ensureSchema }) {
@@ -550,9 +605,18 @@ export async function activatePromo(id, { ensureSchema }) {
   const spec = p.spec || {};
   if (!BENEFITS[spec.benefit]) throw new Error('The proposal has no benefit');
   if (p.book_until && p.book_until < today()) throw new Error('The last booking day has passed');
-  // Checked again now: the service must still exist for this property in Elev8.
-  const resolved = await resolveBenefit(p.property_key, spec.benefit);
-  if (!resolved) throw new Error(`The benefit ${spec.benefit} is not available for this property in Elev8 any more`);
+  const siblings = p.code ? await q("select id, property_key from promos where source = 'engine' and status = 'draft' and code = $1 order by id", [p.code]) : [{ id: p.id, property_key: p.property_key }];
+  // Checked again now: the service must still exist for every villa in Elev8, and be the same one for all of them.
+  const cache = new Map();
+  const all = [];
+  for (const sb of siblings) {
+    const r = await resolveBenefit(sb.property_key, spec.benefit, cache);
+    if (!r) throw new Error(`The benefit ${spec.benefit} is not available for ${sb.property_key} in Elev8 any more`);
+    all.push(r);
+  }
+  if (!all.every((r) => r.raw_name === all[0].raw_name && r.raw_item === all[0].raw_item)) throw new Error('The villas do not offer exactly the same service in Elev8 any more');
+  const listings = [...new Set(all.flatMap((r) => r.listings))];
+  const resolved = { ...all[0], listings };
   const { elev8Tool } = await import('./agent/clients.js');
   const before = await elev8Tool('list_promo_codes', { website: '' });
   if ((before?.results || []).some((c) => normaliseCode(c.promo_code) === p.code)) throw new Error(`The code ${p.code} exists in Elev8 already`);
@@ -565,9 +629,10 @@ export async function activatePromo(id, { ensureSchema }) {
     discount_amount: 0,
     percentage_discount: 0,
     currency: '',
-    upsell: resolved.upsell,
-    upsell_item: resolved.upsell_item,
-    listings: resolved.listings,
+    // one listing: the ids, which are exact. Several: the names, which are the same for all of them.
+    upsell: listings.length > 1 ? resolved.raw_name : resolved.upsell_id,
+    upsell_item: listings.length > 1 ? resolved.raw_item : resolved.item_id,
+    listings,
     quota: spec.quota || QUOTA,
     quota_per_user: spec.perGuest || PER_GUEST,
     booking_from_date: today(),
@@ -578,7 +643,9 @@ export async function activatePromo(id, { ensureSchema }) {
   // The check: the code must be in the list of Elev8 now.
   const after = await elev8Tool('list_promo_codes', { website: '' });
   if (!(after?.results || []).some((c) => normaliseCode(c.promo_code) === p.code)) throw new Error(`Elev8 did not confirm the code ${p.code}. Look in Elev8 before trying again.`);
-  await q("update promos set source = 'elev8', external_id = $2, status = 'active', spec = spec || $3::jsonb, updated_at = now() where id = $1", [id, `elev8:${p.code}:${p.property_key}`, JSON.stringify({ created: new Date().toISOString(), resolved })]);
+  for (const sb of siblings) {
+    await q("update promos set source = 'elev8', external_id = $2, status = 'active', spec = spec || $3::jsonb, updated_at = now() where id = $1", [sb.id, `elev8:${p.code}:${sb.property_key}`, JSON.stringify({ created: new Date().toISOString(), listings })]);
+  }
   await runMirror({ ensureSchema });
   const [row] = await q(`select ${ROW} from promos where id = $1`, [id]);
   return row;
