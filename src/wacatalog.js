@@ -32,6 +32,7 @@ import { lowestNightly, allBlockedRanges, priceString, priceLabel, roundPrice, c
 // that check it is not shown in the WhatsApp catalog. So a normal run sends only the fields that differ from the last run
 // (usually price and availability), a product that did not change is not sent, and photos are set again only when they changed
 // or the last attempt failed. A full send (every field of every product) is POST /wa-catalog/sync?full=1.
+// GET /wa-catalog/inspect reads what Meta holds for each product (diagnosis, changes nothing).
 
 const DAY = 86400000;
 const SYNC_EVERY_MS = 6 * 3600 * 1000;
@@ -513,6 +514,40 @@ export async function syncCatalog({ dryRun = false, force = false } = {}) {
   return result;
 }
 
+/**
+ * Diagnosis: what Meta holds for each product, read from the catalog (changes nothing). The answer is one short line per product
+ * on purpose (the probe of the SM engine keeps only the first part of a response):
+ *   <key>:<main image>+<additional images> <review status> <visibility> <in|out of stock> cdn<main>+<additional>
+ * "cdn" are the copies Meta made of the photos (the ones that are shown to guests); "?" means Meta did not answer for that field.
+ */
+export async function inspectCatalog() {
+  const catalog = await catalogId();
+  if (!catalog) throw new HttpError(409, 'There is no catalog yet.');
+  const head = await graph('GET', catalog, { fields: 'product_count' }).catch(() => ({}));
+  const rows = [];
+  let after = null;
+  for (let page = 0; page < 3; page++) {
+    const r = await graph('GET', `${catalog}/products`, { fields: 'retailer_id,image_url,additional_image_urls,review_status,visibility,availability', limit: 50, ...(after ? { after } : {}) });
+    rows.push(...(r.data || []));
+    after = r.paging?.cursors?.after;
+    if (!r.paging?.next || !after) break;
+  }
+  const cdn = {};
+  let cdnNote = '';
+  try {
+    const r = await graph('GET', `${catalog}/products`, { fields: 'retailer_id,image_cdn_urls,additional_image_cdn_urls', limit: 50 });
+    for (const x of r.data || []) cdn[x.retailer_id] = `${Array.isArray(x.image_cdn_urls) ? x.image_cdn_urls.length : '?'}+${Array.isArray(x.additional_image_cdn_urls) ? x.additional_image_cdn_urls.length : '?'}`;
+  } catch (e) {
+    cdnNote = `cdn fields not readable (${String(e.message || e).slice(0, 80)})`;
+  }
+  const short = (id) => String(id).replace(/^(villa|apartment)-/, '');
+  return {
+    n: head.product_count ?? rows.length,
+    s: rows.map((x) => `${short(x.retailer_id)}:${x.image_url ? 1 : 0}+${Array.isArray(x.additional_image_urls) ? x.additional_image_urls.length : 0} ${x.review_status || '?'} ${x.visibility || '?'} ${x.availability === 'in stock' ? 'in' : 'out'} cdn${cdn[x.retailer_id] ?? '?'}`).join(' | '),
+    note: cdnNote || undefined
+  };
+}
+
 // The sync takes a while (Meta processes the batch), longer than a screen should wait. It runs in the background; the screen
 // asks for the state (run, lastResult). A run that is marked running for more than 10 minutes is taken as dead (restart).
 let running = false;
@@ -570,6 +605,7 @@ export function startWaCatalogSync() {
 
 export function waCatalogRoutes(app, needDb, ah) {
   app.get('/wa-catalog', needDb, ah(async (_req, res) => res.json(await waCatalogStatus())));
+  app.get('/wa-catalog/inspect', needDb, ah(async (_req, res) => res.json(await inspectCatalog())));
   app.post('/wa-catalog/create', needDb, ah(async (_req, res) => res.json(await createCatalog())));
   app.post('/wa-catalog/connect', needDb, ah(async (_req, res) => res.json(await connectCatalog())));
   app.post('/wa-catalog/preview', needDb, ah(async (_req, res) => res.json(await syncCatalog({ dryRun: true }))));
