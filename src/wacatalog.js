@@ -4,24 +4,29 @@ import { graph } from './meta.js';
 import { elev8Tool, pricelabsRows, pricelabsBase, priceIds } from './agent/clients.js';
 import { factsFor, withFacts } from './facts.js';
 import { usdRates } from './fx.js';
-import { lowestNightly, allBlockedRanges, priceString, priceLabel, roundPrice, convertAmount, productUrl, describeVilla, galleryUrls, batchSummary } from './wacatalog-core.js';
+import { lowestNightly, allBlockedRanges, priceString, priceLabel, roundPrice, convertAmount, productUrl, productTitle, sizeBand, PRODUCT_SETS, describeVilla, galleryUrls, withCover, batchSummary } from './wacatalog-core.js';
 
 // WhatsApp catalog: one product per villa in a Meta commerce catalog that is connected to the WhatsApp Business account.
 // The engine creates the catalog (needs META_BUSINESS_ID and a token with catalog_management), keeps it up to date and
 // never sends a guess:
+//   title   name, bedrooms and private pool (what a guest sees in the product list)
 //   text    from the fact sheet of the villa (the "catalog" sentences, each one taken from the facts)
-//   photos  the Elev8 gallery of the listing (public links, in gallery order), the first one is the main image
+//   photos  the Elev8 gallery of the listing (public links, in gallery order), the first one is the main image; a fact sheet can
+//           name a different cover photo ("cover": position in the gallery)
 //   price   lowest nightly price over the next 90 days on free nights: PriceLabs (the price pushed to the channels), free
 //           nights from Elev8. Shown in IDR (WA_CATALOG_CURRENCY): the CHF price is converted with the ECB rate of the day and
-//           rounded to 10,000 IDR. A property that is fully booked shows its PriceLabs base price, is marked "out of stock" and
-//           says "Currently not available." in the text (otherwise "Dates available."). A property without any price or rate
-//           is not sent; its item at Meta stays as it is.
+//           rounded to 10,000 IDR, with "(about USD n)" beside it. A property that is fully booked shows its PriceLabs base price,
+//           is marked "out of stock" and says "Currently not available." in the text (otherwise "Dates available."). A property
+//           without any price or rate is not sent; its item at Meta stays as it is.
 //   link    booking page of the villa with utm_source=whatsapp
+//   labels  custom_label_0 type (villa, apartment, shared villa), 1 area, 2 size band: for the collections and for catalog ads
+//   collections  product sets (PRODUCT_SETS in the core file), created or updated after each sync
 // Besides the single villas there are products that stand for several units: the apartment categories and the shared villa
 // Merapi (SPECIAL below). A unit-based product is sold out only when every unit is blocked; its price is the lowest over the units.
-// Preview first (nothing is written), then sync. A nightly sync runs when WA_CATALOG_AUTO=on and a catalog exists.
+// Preview first (nothing is written), then sync. A sync runs about every 6 hours when WA_CATALOG_AUTO=on and a catalog exists.
 
 const DAY = 86400000;
+const SYNC_EVERY_MS = 6 * 3600 * 1000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const iso = (ms) => new Date(ms).toISOString().slice(0, 10);
 const baliToday = () => {
@@ -51,9 +56,11 @@ const aptUnits = (nums) => (u) => nums.includes(aptNo(u.internal_name));
 
 // Products that are not a single listing. units picks the Elev8 listings behind the product by their internal name.
 // url: the booking page on elevate-villas.com (one page per category; for Merapi the page of room 1).
+// kind: custom_label_0 of the product (a single villa is "villa").
 const SPECIAL = {
   merapi: {
     retailerId: 'villa-merapi',
+    kind: 'shared villa',
     name: 'The R Villa Merapi (shared villa)',
     area: 'Pererenan',
     guests: null,
@@ -62,9 +69,9 @@ const SPECIAL = {
     units: (u) => /merapi/i.test(String(u.internal_name || '')),
     priceListings: MERAPI_PL
   },
-  'apt-studio': { retailerId: 'apartment-studio', name: 'The R Apartments Studio', area: 'Pererenan', guests: null, highlights: 'Studio apartments, walk to the beach', url: `${SITE}/property/the-r-apartments-studio-dc20bb99`, units: aptUnits([4, 5, 6, 7]) },
-  'apt-mezzanine': { retailerId: 'apartment-mezzanine', name: 'The R Apartments Mezzanine', area: 'Pererenan', guests: 3, highlights: 'Mezzanine apartments with balcony', url: `${SITE}/property/the-r-pererenan-mezzanine-apartment-w-balcony-90672e94`, units: aptUnits([8, 9, 10, 11]) },
-  'apt-plunge': { retailerId: 'apartment-plunge-pool', name: 'The R Apartments Mezzanine with Plunge Pool', area: 'Pererenan', guests: 3, highlights: 'Mezzanine studio with plunge pool', url: `${SITE}/property/1-3-plunge-pool-0efd1608`, units: aptUnits([1, 2, 3]) }
+  'apt-studio': { retailerId: 'apartment-studio', kind: 'apartment', name: 'The R Apartments Studio', area: 'Pererenan', guests: null, highlights: 'Studio apartments, walk to the beach', url: `${SITE}/property/the-r-apartments-studio-dc20bb99`, units: aptUnits([4, 5, 6, 7]) },
+  'apt-mezzanine': { retailerId: 'apartment-mezzanine', kind: 'apartment', name: 'The R Apartments Mezzanine', area: 'Pererenan', guests: 3, highlights: 'Mezzanine apartments with balcony', url: `${SITE}/property/the-r-pererenan-mezzanine-apartment-w-balcony-90672e94`, units: aptUnits([8, 9, 10, 11]) },
+  'apt-plunge': { retailerId: 'apartment-plunge-pool', kind: 'apartment', name: 'The R Apartments Mezzanine with Plunge Pool', area: 'Pererenan', guests: 3, highlights: 'Mezzanine studio with plunge pool', url: `${SITE}/property/1-3-plunge-pool-0efd1608`, units: aptUnits([1, 2, 3]) }
 };
 
 export const waCatalogSettings = () => ({
@@ -187,15 +194,24 @@ async function basePriceOf(ids, pls, sourceCurrency) {
   return null;
 }
 
-/** A price in the catalog currency. IDR is rounded to a readable step. */
+/** A price in the catalog currency (IDR is rounded to a readable step) and, beside it, about how many USD that is (to 5). */
 async function toCatalogPrice(amount, sourceCurrency, currency, warnings) {
-  if (sourceCurrency === currency) return { price: roundPrice(amount, currency), converted: false, base: null };
+  if (sourceCurrency === currency) return { price: roundPrice(amount, currency), converted: false, base: null, usd: null };
   const fx = await usdRates([sourceCurrency, currency]);
   const price = roundPrice(convertAmount(amount, sourceCurrency, currency, fx.rates), currency);
   if (fx.stale) warnings.push('The exchange rate is not from today (rate service not reachable)');
+  let usd = null;
+  if (currency !== 'USD') {
+    try {
+      usd = Math.max(5, Math.round(convertAmount(amount, sourceCurrency, 'USD', fx.rates) / 5) * 5);
+    } catch {
+      usd = null;
+    }
+  }
   return {
     price,
     converted: true,
+    usd,
     base: { amount: Math.round(amount), currency: sourceCurrency, rate: Math.round((fx.rates[currency] / (sourceCurrency === 'USD' ? 1 : fx.rates[sourceCurrency])) * 100) / 100, date: fx.date, source: fx.source, stale: Boolean(fx.stale) }
   };
 }
@@ -207,6 +223,7 @@ export async function buildProduct(prop, settings, special = null) {
   const from = iso(baliToday() + DAY);
   const to = iso(baliToday() + settings.days * DAY);
   const retailerId = special?.retailerId || `villa-${key}`;
+  const sheet = factsFor(key);
 
   // Elev8: the units behind the product, the nights that cannot be booked, the id of the gallery.
   let blocked;
@@ -231,6 +248,7 @@ export async function buildProduct(prop, settings, special = null) {
     throw new Error(`Photos from Elev8 not available (${e.message})`);
   }
   if (!images.length) throw new Error('The Elev8 listing has no photos');
+  images = withCover(images, sheet?.cover);
 
   const ids = special?.priceListings || [plIds()[key]].filter(Boolean);
   if (!ids.length) throw new Error(`No PriceLabs listing for "${key}" (PRICELABS_LISTINGS)`);
@@ -245,11 +263,13 @@ export async function buildProduct(prop, settings, special = null) {
   const soldOut = freeNights === 0;
 
   let price = null;
+  let usd = null;
   let priceSource = 'pricelabs';
   let base = null;
   if (mins.length) {
     const c = await toCatalogPrice(Math.min(...mins), sourceCurrency, currency, warnings);
     price = c.price;
+    usd = c.usd;
     base = c.base;
     if (c.converted) priceSource = 'pricelabs_converted';
   } else if (soldOut) {
@@ -258,6 +278,7 @@ export async function buildProduct(prop, settings, special = null) {
     if (!b) throw new Error('Fully booked and no base price in PriceLabs');
     const c = await toCatalogPrice(b.amount, String(b.currency || sourceCurrency).toUpperCase(), currency, warnings);
     price = c.price;
+    usd = c.usd;
     base = c.base;
     priceSource = b.source;
     warnings.push('Fully booked: the PriceLabs base price is shown');
@@ -270,12 +291,26 @@ export async function buildProduct(prop, settings, special = null) {
     warnings.push('No current price, the last price that was sent is kept');
   }
 
-  const sheet = factsFor(key);
   const p = withFacts(prop);
   const availability = soldOut ? 'out of stock' : 'in stock';
   const link = productUrl(prop.url, key);
   // "Dates available" says there are free nights in the next 90 days, not that a given date is free.
-  const fromLine = `From ${priceLabel(price, currency)} per night. ${soldOut ? 'Currently not available.' : 'Dates available.'}`;
+  const fromLine = `From ${priceLabel(price, currency)} per night${usd ? ` (about USD ${usd})` : ''}. ${soldOut ? 'Currently not available.' : 'Dates available.'}`;
+  const payload = {
+    id: retailerId,
+    title: productTitle(p.name, sheet),
+    description: describeVilla(p, sheet, fromLine),
+    availability,
+    condition: 'new',
+    price: priceString(price, currency),
+    link,
+    image_link: images[0],
+    brand: 'The R Villas Bali',
+    custom_label_0: special?.kind || 'villa'
+  };
+  if (prop.area) payload.custom_label_1 = String(prop.area);
+  const band = sizeBand(sheet?.bedrooms);
+  if (band && !special) payload.custom_label_2 = band;
   return {
     retailerId,
     propertyKey: key,
@@ -288,17 +323,7 @@ export async function buildProduct(prop, settings, special = null) {
     imageCount: images.length,
     extraImages: images.slice(1),
     warnings,
-    payload: {
-      id: retailerId,
-      title: String(p.name).slice(0, 150),
-      description: describeVilla(p, sheet, fromLine),
-      availability,
-      condition: 'new',
-      price: priceString(price, currency),
-      link,
-      image_link: images[0],
-      brand: 'The R Villas Bali'
-    }
+    payload
   };
 }
 
@@ -361,6 +386,28 @@ async function setExtraImages(catalog, retailerId, urls) {
   await graph('POST', itemId, { additional_image_urls: urls });
 }
 
+/** The collections (product sets) of the catalog: created when missing, the filter set again when they exist. Returns the problems, if any. */
+async function ensureProductSets(catalog) {
+  const notes = [];
+  let byName = new Map();
+  try {
+    const have = await graph('GET', `${catalog}/product_sets`, { fields: 'id,name', limit: 100 });
+    byName = new Map((have.data || []).map((s) => [s.name, s.id]));
+  } catch (e) {
+    return [`collections not checked (${String(e.message || e).slice(0, 150)})`];
+  }
+  for (const s of PRODUCT_SETS) {
+    const filter = { [`custom_label_${s.label}`]: { eq: s.value } };
+    try {
+      if (byName.has(s.name)) await graph('POST', byName.get(s.name), { filter });
+      else await graph('POST', `${catalog}/product_sets`, { name: s.name, filter });
+    } catch (e) {
+      notes.push(`collection "${s.name}" not set (${String(e.message || e).slice(0, 150)})`);
+    }
+  }
+  return notes;
+}
+
 /**
  * Build the products and either show them (dryRun, nothing is written) or send them to the catalog in one batch.
  * A villa that cannot be built is left out and listed under errors; the rest is still sent.
@@ -385,6 +432,7 @@ export async function syncCatalog({ dryRun = false } = {}) {
       extras.push(`${i.retailerId}: extra photos not set (${String(e.message || e).slice(0, 150)}), the next sync tries again`);
     }
   }
+  extras.push(...(await ensureProductSets(catalog)));
 
   for (const i of built.items) {
     const bad = batch.errors.some((e) => e.startsWith(i.retailerId));
@@ -442,14 +490,14 @@ export async function waCatalogStatus() {
   };
 }
 
-/** Every hour a check; a sync runs when the last one is more than 22 hours ago. Only with WA_CATALOG_AUTO=on and an existing catalog. */
+/** Every hour a check; a sync runs when the last one is more than 6 hours ago. Only with WA_CATALOG_AUTO=on and an existing catalog. */
 export function startWaCatalogSync() {
   const run = async () => {
     try {
       if (!dbEnabled() || !waCatalogSettings().auto) return;
       if (!(await catalogId())) return;
       const last = await getState('lastSync');
-      if (last?.at && Date.now() - Date.parse(last.at) < 22 * 3600 * 1000) return;
+      if (last?.at && Date.now() - Date.parse(last.at) < SYNC_EVERY_MS) return;
       await syncCatalog();
     } catch (e) {
       console.error('WhatsApp catalog sync failed:', e.message);
