@@ -33,6 +33,10 @@ import { lowestNightly, allBlockedRanges, priceString, priceLabel, roundPrice, c
 // (usually price and availability), a product that did not change is not sent, and photos are set again only when they changed
 // or the last attempt failed. A full send (every field of every product) is POST /wa-catalog/sync?full=1.
 // GET /wa-catalog/inspect reads what Meta holds for each product (diagnosis, changes nothing).
+//
+// Experiment: WhatsApp shows only the main photo although Meta holds all ten. WA_CATALOG_IMAGES_ONE_STEP lists the products
+// (keys, comma separated) whose photos are sent differently: additional_image_link goes into the batch together with the main
+// photo, and the extra photos are set together with the main photo in ONE call (image_url + additional_image_urls).
 
 const DAY = 86400000;
 const SYNC_EVERY_MS = 6 * 3600 * 1000;
@@ -43,6 +47,7 @@ const baliToday = () => {
   return Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate());
 };
 const list = (v, d) => String(v || d).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+const oneStepKeys = () => list(process.env.WA_CATALOG_IMAGES_ONE_STEP, '');
 
 const SITE = 'https://www.elevate-villas.com';
 
@@ -327,6 +332,8 @@ export async function buildProduct(prop, settings, special = null) {
   if (band && !special) payload.custom_label_2 = band;
   // A running promotion for this property (or for all): the label only, nothing the guest reads changes.
   if ((settings.promos || []).some((x) => x.property_key === 'all' || x.property_key === promoKey(key))) payload.custom_label_3 = OFFER_SET.value;
+  // Experiment (see the top of the file): the extra photos also go into the batch, together with the main photo.
+  if (oneStepKeys().includes(key) && images.length > 1) payload.additional_image_link = images.slice(1).join(',');
   return {
     retailerId,
     propertyKey: key,
@@ -392,8 +399,11 @@ async function waitBatch(id, handle) {
   }
 }
 
-/** Additional photos go in with a second, documented call per item: the item must exist at Meta first. */
-async function setExtraImages(catalog, retailerId, urls) {
+/**
+ * Additional photos go in with a second, documented call per item: the item must exist at Meta first.
+ * With mainUrl (the experiment) the main photo goes in the same call, so the whole photo set is written at once.
+ */
+async function setExtraImages(catalog, retailerId, urls, mainUrl = null) {
   if (!urls.length) return;
   let itemId = null;
   for (let i = 0; i < 4 && !itemId; i++) {
@@ -402,7 +412,7 @@ async function setExtraImages(catalog, retailerId, urls) {
     if (!itemId) await sleep(5000);
   }
   if (!itemId) throw new Error('the item is not visible at Meta yet');
-  await graph('POST', itemId, { additional_image_urls: urls });
+  await graph('POST', itemId, mainUrl ? { image_url: mainUrl, additional_image_urls: urls } : { additional_image_urls: urls });
 }
 
 /** The collections (product sets) of the catalog: the ones that are missing are created, existing ones are left as they are. Returns the problems, if any. */
@@ -430,6 +440,7 @@ async function ensureProductSets(catalog) {
  * What to send for one product. A new product (or force) goes with every field. A known product goes with the fields that differ
  * from the last send; nothing differs means nothing is sent. A custom label that is gone now (a promotion that ended) is sent
  * empty. Photos are set again only when they changed or the last try failed.
+ * When additional_image_link is new (the experiment) the main photo is sent with it, and the photos are set again once.
  * old is the stored payload of the last send (it also carries __photos, the photo list, and __photosOk, whether the extra photos were set).
  */
 export function planItem(item, old, force = false) {
@@ -450,8 +461,10 @@ export function planItem(item, old, force = false) {
       changed.push(k);
     }
   }
+  const photoExperiment = changed.includes('additional_image_link');
+  if (photoExperiment && !('image_link' in data)) data.image_link = item.payload.image_link;
   // A row stored before this logic has no photo record: it counts as set (the photos were checked by hand).
-  const needExtras = __photosOk === false || (__photos !== undefined && __photos !== photos);
+  const needExtras = photoExperiment || __photosOk === false || (__photos !== undefined && __photos !== photos);
   return { data, changed, send: changed.length > 0, photos, needExtras };
 }
 
@@ -480,12 +493,15 @@ export async function syncCatalog({ dryRun = false, force = false } = {}) {
   }
 
   const notes = [];
+  const experiment = oneStepKeys();
   for (const p of plan) {
     p.extrasOk = p.prev?.__photosOk !== false;
     if (!p.needExtras) continue;
+    const oneStep = experiment.includes(p.i.propertyKey);
     try {
-      await setExtraImages(catalog, p.i.retailerId, p.i.extraImages);
+      await setExtraImages(catalog, p.i.retailerId, p.i.extraImages, oneStep ? p.i.payload.image_link : null);
       p.extrasOk = true;
+      if (oneStep) notes.push(`${p.i.retailerId}: photos sent in one step (experiment)`);
     } catch (e) {
       p.extrasOk = false;
       notes.push(`${p.i.retailerId}: extra photos not set (${String(e.message || e).slice(0, 150)}), the next sync tries again`);
