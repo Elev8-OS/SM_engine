@@ -2,6 +2,7 @@ import { q } from './db.js';
 import { HttpError } from './util.js';
 import { graph } from './meta.js';
 import { catalogId, startSync, waCatalogSettings } from './wacatalog.js';
+import { badgeRoutes } from './wacatalog-badge.js';
 
 // Recreate a product of the WhatsApp catalog: the product is deleted at Meta and sent again as a NEW product with all its photos.
 // Why: WhatsApp keeps showing one photo for a product it has read once, although the Commerce Manager holds all of them. A product
@@ -148,6 +149,7 @@ export async function touchProduct(key, change) {
 }
 
 export function recreateRoutes(app, needDb, ah) {
+  badgeRoutes(app, needDb, ah);
   app.get('/wa-catalog/touch', needDb, ah(async (req, res) => {
     if (String(req.query.confirm || '') !== '1') throw new HttpError(400, 'This changes one field of one product at Meta. Add confirm=1.');
     res.json(await touchProduct(String(req.query.key || ''), String(req.query.change || '')));
