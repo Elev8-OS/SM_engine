@@ -38,12 +38,32 @@ export const UNREADABLE_REPLY = 'Hi, this is the virtual assistant of The R Vill
 /** What the prompt says on top for WhatsApp. */
 export const WA_PROMPT_NOTE = [
   'Channel: WhatsApp. The guest wrote to the sales number of The R Villas Bali, so you never need to ask for a phone number.',
-  'Format: plain text in the language of the guest. At most 3 short paragraphs separated by a blank line. Put a booking link on a line of its own at the very end, with nothing after it.'
+  'Format: plain text in the language of the guest. At most 3 short paragraphs separated by a blank line. Put a booking link on a line of its own at the very end, with nothing after it.',
+  'Promotion codes: a guest often arrives from an ad with a ready-made first message that carries a code (for example "Hi, I saw your offer, code ELEVATEDSTAY"). Look for the code in the active_promotions of list_villas. Only a code that is found there and whose terms fit the stay may be confirmed, and then it goes into build_booking_link as promo_code. A code that is not found, has expired or does not fit the stay: say so kindly, do not promise any discount, and hand over to the team if the guest insists. Without dates or guests yet, ask for them first and say that you will check the code for those dates.'
 ].join('\n');
 
-/** The booking links of the tools carry the Instagram tracking. For WhatsApp they carry WhatsApp tracking instead. */
+/**
+ * The booking links of the tools carry the Instagram tracking. For WhatsApp they carry WhatsApp tracking instead.
+ * A link that carries a promotion code also gets utm_content=promo_<code>, so a campaign can be told apart afterwards.
+ */
 export function swapUtm(value) {
-  return JSON.parse(JSON.stringify(value ?? null).replaceAll('utm_source=instagram', 'utm_source=whatsapp').replaceAll('utm_medium=dm', 'utm_medium=chat'));
+  const swapped = JSON.parse(JSON.stringify(value ?? null).replaceAll('utm_source=instagram', 'utm_source=whatsapp').replaceAll('utm_medium=dm', 'utm_medium=chat'));
+  const tag = (v) => {
+    if (Array.isArray(v)) return void v.forEach(tag);
+    if (!v || typeof v !== 'object') return;
+    if (typeof v.booking_link === 'string' && v.promo_code) {
+      try {
+        const u = new URL(v.booking_link);
+        u.searchParams.set('utm_content', `promo_${String(v.promo_code).toLowerCase()}`);
+        v.booking_link = u.toString();
+      } catch {
+        // keep the link as it is
+      }
+    }
+    Object.values(v).forEach(tag);
+  };
+  tag(swapped);
+  return swapped;
 }
 
 const headers = () => ({ Authorization: `Bearer ${process.env.GHL_API_TOKEN}`, Version: '2021-04-15', 'Content-Type': 'application/json', Accept: 'application/json' });
