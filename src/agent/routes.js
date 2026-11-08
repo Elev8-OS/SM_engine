@@ -8,6 +8,7 @@ import { villaView, linkResult, withFees } from './villas.js';
 import { areaGuide } from './area-guide.js';
 import { categoryOf, categoryRow, categoryRows, categoryAvailability, categoryPrices, enrich } from './multiunit.js';
 import { convert } from './currency.js';
+import { budgetCheck } from './negotiation.js';
 import { livePromos, promoRoutes } from '../promos.js';
 import { readGuest, whyEmpty } from './read.js';
 import { loadSettings, saveSettings, settingsView, mayAutoSend } from './settings.js';
@@ -121,6 +122,7 @@ export async function execute(name, input) {
   }
   if (name === 'convert_currency') return convert(input);
   if (name === 'area_guide') return areaGuide(await villa(input.villa), input.topic);
+  if (name === 'check_budget') return budgetCheck(input);
   if (name === 'build_booking_link') {
     const p = await villa(input.villa);
     checkDates(input);
