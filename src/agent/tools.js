@@ -137,6 +137,16 @@ export const TOOLS = [
     }
   },
   {
+    name: 'area_guide',
+    description: 'Passages from the area guide of a villa or apartment category (beach, restaurants, cafes, bars, sights, activities, shops, ATM, transport, medical help). Call it for every question about the surroundings, with the villa key and the topic in a few words (any language). Answer only from the passages it returns.',
+    input_schema: {
+      type: 'object',
+      properties: { villa: { type: 'string', description: 'Villa key from list_villas, e.g. patuha or apt-studio' }, topic: { type: 'string', description: 'What the guest wants to know, in a few words, e.g. "vegan restaurants", "closest beach", "ATM", "yoga"' } },
+      required: ['villa', 'topic'],
+      additionalProperties: false
+    }
+  },
+  {
     name: 'submit_reply',
     description: 'Finish with the reply to send to the guest. Call this exactly once, last.',
     input_schema: {
@@ -177,6 +187,7 @@ export function systemPrompt(today) {
     `- If dates, number of guests or both are missing, ask for them in one short question instead of guessing. Ask for adults and children together ("how many adults and how many children?"). When the booking link is the next step, add the currency in the same question ("... and in which currency should I create the booking link, ${cur}, USD, EUR or another?"). If the guest answers with only a number of adults (for example "2") after you asked for both, take children as 0 and do not ask about children again. If the guest names no currency, use the currency you quoted the price in (${cur} by default), say in one short clause which currency the link opens in and that you can change it, and do not ask a second time. You may suggest villas that fit the guest count.`,
     '- A group larger than the villa sleeps (guests in list_villas) does not fit: say so and suggest a villa that does, or hand over to the team.',
     '- The apartments come in three categories (apt-studio, apt-mezzanine, apt-plunge) and Merapi (merapi) is a shared villa with private rooms. Use their keys like a villa key: check_availability, get_prices and build_booking_link work for them. Free means that at least one unit or room is free, and the price is the lowest of the category, so say "from". Never name a unit: the booking page shows which one is free. For one room for 1 or 2 guests offer the studio first, the mezzanine for up to 3 guests, and a villa only when the guest wants more space or the group is larger. State only what the fact sheet of that category confirms.',
+    '- Surroundings: for any question about the area (beach, restaurants, cafes, bars, sights, activities, shops, ATM, transport, medical help) call area_guide with the key of the villa the guest asks about or considers, and the topic in a few words. Answer only from the passages it returns, in the language of the guest, with at most 3 or 4 places and the distance as written. Never quote prices, star ratings or opening hours (say that Google Maps shows the current ones). If the passages do not answer, say that the team will tell the guest. If no villa is known yet, ask which one or use the one already discussed.',
     `- To book, share a booking link. Once the villa, check-in, check-out, the number of adults and the number of children are all known from the guest, call build_booking_link and share exactly the link it returns, because it opens the booking page with the stay already filled in. Pass the currency the guest chose for the link as currency (3-letter code); without a choice use the currency you quoted in (${cur} by default). Until all of that is known, share the booking_link from list_villas. Never guess a date or a number for the link. Children are 0 when the guest gave only the number of adults after you asked for both. Check availability first and do not send a link for dates that are not available: offer other dates or another villa.`,
     '- Promotions: a villa may list active_promotions (code, terms, stay window, minimum nights, last booking day). You may offer one when the stay fits its terms and it helps the guest decide: at most once per conversation, in the words of the terms. Never invent, extend or combine offers and never promise a discount. If the guest asks for a discount and no active promotion fits, hand over to the team. When you share a promotion, call build_booking_link with its promo_code.',
     '- Do not promise a booking, do not take payment details, do not hold dates.',
