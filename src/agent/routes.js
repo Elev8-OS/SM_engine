@@ -5,6 +5,7 @@ import { factsFor } from '../facts.js';
 import { runAgent } from './run.js';
 import { TOOLS, systemPrompt, availabilityFrom, priceSummary, isDate, nightsBetween } from './tools.js';
 import { villaView, linkResult, withFees } from './villas.js';
+import { categoryOf, categoryRow, categoryRows, categoryAvailability, categoryPrices, enrich } from './multiunit.js';
 import { convert } from './currency.js';
 import { livePromos, promoRoutes } from '../promos.js';
 import { readGuest, whyEmpty } from './read.js';
@@ -52,7 +53,7 @@ function ensureSchema() {
 
 const sha = (s) => crypto.createHash('sha1').update(String(s)).digest('hex').slice(0, 16);
 const today = () => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
-const MULTI_UNIT = new Set(['apartments', 'merapi']);
+// The apartments (three categories) and Merapi (rooms) are worked out in multiunit.js: free when at least one unit is free, the lowest price.
 
 /** First string or number value under a key matching re, searched a few levels deep. */
 function findKey(obj, re, depth = 0) {
@@ -88,9 +89,13 @@ export function extractInbound(b) {
 
 async function villa(key) {
   const k = String(key || '').toLowerCase();
+  // The apartments come as three categories (list_villas shows them): the old collective key is answered with the way out.
+  if (k === 'apartments') throw new Error("The apartments are split into apt-studio, apt-mezzanine and apt-plunge. Use list_villas and pick the category that fits the guests.");
+  const cat = categoryRow(k);
+  if (cat) return cat;
   const rows = await q('select * from properties where key = $1', [k]);
   if (!rows.length) throw new Error(`Unknown villa '${key}'. Use list_villas.`);
-  return rows[0];
+  return enrich(rows[0]);
 }
 
 function checkDates(input) {
@@ -109,18 +114,22 @@ export async function execute(name, input) {
     const rows = await q('select key, name, area, type, guests, size_m2, bedrooms, url, highlights, open_questions from properties order by key');
     // Promotions the team set live in the SM Manager: Lea sees them per villa and may offer only these.
     const promos = await livePromos();
-    return rows.map((p) => villaView(p, MULTI_UNIT.has(p.key), promos.filter((x) => x.property_key === 'all' || x.property_key === p.key)));
+    // The collective row "apartments" is replaced by its three categories; Merapi keeps its row, with the page and the notes of its rooms.
+    const all = [...rows.filter((p) => p.key !== 'apartments').map(enrich), ...categoryRows()].sort((a, b) => a.key.localeCompare(b.key));
+    return all.map((p) => villaView(p, false, promos.filter((x) => x.property_key === 'all' || x.property_key === (p.promoKey ?? p.key))));
   }
   if (name === 'convert_currency') return convert(input);
   if (name === 'build_booking_link') {
     const p = await villa(input.villa);
     checkDates(input);
-    return linkResult(p, input, { multiUnit: MULTI_UNIT.has(p.key), promos: input.promo_code ? await livePromos() : [] });
+    return linkResult(p, input, { multiUnit: Boolean(categoryOf(p.key)), promos: input.promo_code ? await livePromos() : [] });
   }
   if (name === 'check_availability' || name === 'get_prices') {
     const p = await villa(input.villa);
     const { ci, co } = checkDates(input);
-    if (MULTI_UNIT.has(p.key)) return { available: null, ok: false, note: 'Several units. The team confirms.' };
+    // Apartments and Merapi: several units, see multiunit.js.
+    const cat = categoryOf(p.key);
+    if (cat) return name === 'check_availability' ? categoryAvailability(cat, ci, co) : withFees(await categoryPrices(cat, ci, co), factsFor(p.key)?.fees);
     if (name === 'check_availability') {
       const short = p.name.replace(/^The R Villa\s+/i, '');
       const to = new Date(Date.parse(`${co}T00:00:00Z`) + 30 * 86400000).toISOString().slice(0, 10);
