@@ -9,7 +9,7 @@ import { areaGuide } from './area-guide.js';
 import { categoryOf, categoryRow, categoryRows, categoryAvailability, categoryPrices, enrich } from './multiunit.js';
 import { convert } from './currency.js';
 import { budgetCheck } from './negotiation.js';
-import { DEAL_TOOL, dealCodesOn, createDealCode } from './deal-code.js';
+import { DEAL_TOOL, dealCodesOn, createDealCode, unitListingRefs } from './deal-code.js';
 import { livePromos, promoRoutes } from '../promos.js';
 import { readGuest, whyEmpty } from './read.js';
 import { loadSettings, saveSettings, settingsView, mayAutoSend } from './settings.js';
@@ -160,7 +160,7 @@ const agentTools = () => (dealCodesOn() ? [...TOOLS, DEAL_TOOL] : TOOLS);
 function dealDeps() {
   return {
     villa,
-    // Apartment categories work (the code covers every unit); Merapi (rooms) is left to the team.
+    // Apartment categories work (the code is limited to the group); Merapi (rooms) is left to the team.
     unsupported: (key) => categoryOf(key)?.kind === 'room',
     maxGuests,
     checkDates,
@@ -168,13 +168,15 @@ function dealDeps() {
     // Whether a code of ours with this name exists already (the codes Lea made are kept in agent_settings).
     codeTaken: async (code) => (await q("select 1 from agent_settings where key like 'deal%' and value->>'code' = $1 limit 1", [code])).length > 0,
     convert,
-    // The exact name in Elev8 the code is limited to. A villa is one listing. The units of an apartment category are separate rows in Elev8 that share one listing id,
-    // and a code tied to one of those rows is refused on the booking page of another (seen on 8 Nov 2026), so categories get no restriction (null):
-    // the code stays safe through its single use, its one day of validity and the dates of the stay.
+    // What the code is limited to. A villa is one listing. An apartment group (1-3, 4-7, 8-11) shares one listing id with a row per unit and carries two listing names:
+    // the code needs both, or the booking page of the group refuses it (seen on 8 Nov 2026). See unitListingRefs.
     listingNames: async (p, ci) => {
       const to = new Date(Date.parse(`${ci}T00:00:00Z`) + 2 * 86400000).toISOString().slice(0, 10);
       const cat = categoryOf(p.key);
-      if (cat) return null;
+      if (cat) {
+        const res = await elev8Tool('get_blocked_dates', { from_date: ci, to_date: to, listing_name: cat.query, listing_tag: '' });
+        return unitListingRefs(res?.results, cat.pick);
+      }
       const short = p.name.replace(/^The R Villa\s+/i, '');
       const res = await elev8Tool('get_blocked_dates', { from_date: ci, to_date: to, listing_name: short, listing_tag: '' });
       const hits = (res?.results || []).filter((r) => `${r.internal_name} ${r.listing_name}`.toLowerCase().includes(short.toLowerCase()));
