@@ -80,6 +80,10 @@ export async function whyState(part = 1) {
       return `app ${d.application || '?'} ${d.app_id || ''} | type ${d.type} | valid ${d.is_valid} | expires ${d.expires_at || 'never'} | issued ${d.issued_at || '?'}`;
     }));
     lines.push(await step('scopes', async () => ((await dbg()).scopes || []).join(',') || 'none'));
+  } else if (part === 9) {
+    // The phone numbers of the WhatsApp account and when each was last onboarded (a new onboarding by another app resets what the number shows).
+    lines.push(await step('numbers', async () => ((await graph('GET', `${s.wabaId}/phone_numbers`, { fields: 'display_phone_number,verified_name,status,quality_rating,name_status,platform_type,account_mode,last_onboarded_time,is_pin_enabled', limit: 10 })).data || []).map((x) => `${x.id} ${x.display_phone_number} ${x.verified_name} | ${x.status} | ${x.platform_type} | onboarded ${x.last_onboarded_time || '?'} | pin ${x.is_pin_enabled}`).join(' ;; ') || 'none'));
+    lines.push(await step('phone id in use', async () => s.phoneId));
   } else {
     // The permissions of the token per asset: which WhatsApp accounts, catalogs and businesses each permission reaches.
     lines.push(await step('granular', async () => ((await graph('GET', 'debug_token', { input_token: process.env.META_ADS_TOKEN })).data?.granular_scopes || []).map((g) => `${g.scope}:${(g.target_ids || []).join('/') || 'all'}`).join(' ; ').slice(0, 900) || 'none'));
