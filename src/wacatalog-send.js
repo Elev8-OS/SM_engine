@@ -1,6 +1,8 @@
 import { q } from './db.js';
 import { HttpError } from './util.js';
-import { catalogId, waCatalogSettings } from './wacatalog.js';
+import { catalogId, waCatalogSettings, connectCatalog } from './wacatalog.js';
+import { graph } from './meta.js';
+import { elev8Tool } from './agent/clients.js';
 
 // Product messages: a catalog product (or several) sent into a WhatsApp chat as an interactive message that shows the photo, title and
 // price, with a button to open the product. Only inside the 24 hours after the guest's last message. This is the TEST of the way:
@@ -71,7 +73,58 @@ export async function sendProductMessage({ to, keys, text }) {
   return postProducts(to, rows.map((r) => r.retailer_id), text);
 }
 
+/**
+ * Diagnosis of the catalog button in the WhatsApp chat: what Meta says about the number (name, status), whether the catalog is shown in
+ * the chat (is_catalog_visible) and which catalogs are linked to the WhatsApp account. With fix (and confirm) it links the catalog again
+ * and switches it visible, the same step as the first set-up. One short answer, because the probe keeps only the first part.
+ */
+export async function commerceState({ fix = false } = {}) {
+  const s = waCatalogSettings();
+  const catalog = await catalogId();
+  const out = { catalog, phone: null, commerce: null, linked: null, errors: [] };
+  const cut = (e) => String(e?.message || e).slice(0, 120);
+  try {
+    const p = await graph('GET', s.phoneId, { fields: 'display_phone_number,verified_name,name_status,quality_rating,platform_type,code_verification_status' });
+    out.phone = `${p.display_phone_number} | ${p.verified_name} | name ${p.name_status} | ${p.platform_type} | ${p.code_verification_status} | quality ${p.quality_rating}`;
+  } catch (e) {
+    out.errors.push(`phone: ${cut(e)}`);
+  }
+  try {
+    const c = await graph('GET', `${s.phoneId}/whatsapp_commerce_settings`);
+    const x = c.data?.[0] ?? c;
+    out.commerce = `catalog visible ${x.is_catalog_visible}, cart ${x.is_cart_enabled}`;
+  } catch (e) {
+    out.errors.push(`commerce: ${cut(e)}`);
+  }
+  try {
+    const l = await graph('GET', `${s.wabaId}/product_catalogs`, { fields: 'id,name' });
+    out.linked = (l.data || []).map((x) => `${x.id} ${x.name}`).join(' ; ') || 'none';
+  } catch (e) {
+    out.errors.push(`linked: ${cut(e)}`);
+  }
+  if (fix) out.fix = await connectCatalog();
+  return out;
+}
+
+/** Test: does the token of the engine get a price from Elev8 (get_quote, the price of a stay with fees and taxes, as the website charges it)? */
+export async function quoteTest({ villa, checkIn, checkOut, adults, children }) {
+  try {
+    const r = await elev8Tool('get_quote', { check_in_date: checkIn, check_out_date: checkOut, listing_id: '', listing_name: villa, number_of_adults: adults, number_of_children: children, rate_plan_id: '' });
+    return { ok: true, raw: JSON.stringify(r).slice(0, 1500) };
+  } catch (e) {
+    return { ok: false, error: String(e.message || e).slice(0, 300) };
+  }
+}
+
 export function sendRoutes(app, needDb, ah) {
+  app.get('/wa-catalog/commerce', needDb, ah(async (req, res) => {
+    const fix = String(req.query.fix || '') === '1';
+    if (fix && String(req.query.confirm || '') !== '1') throw new HttpError(400, 'fix links the catalog to the WhatsApp account again and switches it visible. Add confirm=1.');
+    res.json(await commerceState({ fix }));
+  }));
+  app.get('/wa-catalog/quote-test', needDb, ah(async (req, res) => {
+    res.json(await quoteTest({ villa: String(req.query.villa || 'Bratan'), checkIn: String(req.query.in || '2026-12-05'), checkOut: String(req.query.out || '2026-12-09'), adults: Number(req.query.adults) || 3, children: Number(req.query.children) || 0 }));
+  }));
   app.get('/wa-catalog/send-test', needDb, ah(async (req, res) => {
     if (String(req.query.confirm || '') !== '1') throw new HttpError(400, 'This sends one WhatsApp product message to the number you name. Add confirm=1.');
     const keys = String(req.query.key || '').split(',').map((s) => s.trim()).filter(Boolean);
