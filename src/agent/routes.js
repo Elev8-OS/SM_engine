@@ -5,6 +5,7 @@ import { factsFor } from '../facts.js';
 import { runAgent } from './run.js';
 import { TOOLS, systemPrompt, availabilityFrom, priceSummary, isDate, nightsBetween } from './tools.js';
 import { villaView, linkResult, withFees } from './villas.js';
+import { areaGuide } from './area-guide.js';
 import { categoryOf, categoryRow, categoryRows, categoryAvailability, categoryPrices, enrich } from './multiunit.js';
 import { convert } from './currency.js';
 import { livePromos, promoRoutes } from '../promos.js';
@@ -119,6 +120,7 @@ export async function execute(name, input) {
     return all.map((p) => villaView(p, false, promos.filter((x) => x.property_key === 'all' || x.property_key === (p.promoKey ?? p.key))));
   }
   if (name === 'convert_currency') return convert(input);
+  if (name === 'area_guide') return areaGuide(await villa(input.villa), input.topic);
   if (name === 'build_booking_link') {
     const p = await villa(input.villa);
     checkDates(input);
@@ -331,6 +333,11 @@ export function agentPrivate(app, needDb, ah) {
       ? await q(`select ${cols} from inquiries where status = $1 order by id desc limit $2`, [req.query.status, limit])
       : await q(`select ${cols} from inquiries order by id desc limit $1`, [limit]);
     res.json({ inquiries: rows });
+  }));
+
+  // Which area guides Lea reads for a property and what she finds for a topic. Sends nothing.
+  app.get('/agent/area-test', ah(async (req, res) => {
+    res.json(await areaGuide(await villa(req.query.villa), String(req.query.topic || '')));
   }));
 
   app.get('/agent/debug', needDb, ah(async (_req, res) => {
