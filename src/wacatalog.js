@@ -5,6 +5,7 @@ import { elev8Tool, pricelabsRows, pricelabsBase, priceIds } from './agent/clien
 import { factsFor, withFacts } from './facts.js';
 import { usdRates } from './fx.js';
 import { livePromos } from './promos.js';
+import { offerImageUrl } from './offer-image.js';
 import { lowestNightly, allBlockedRanges, priceString, priceLabel, roundPrice, convertAmount, productUrl, productTitle, sizeBand, PRODUCT_SETS, describeVilla, galleryUrls, withCover, batchSummary } from './wacatalog-core.js';
 
 // WhatsApp catalog: one product per villa in a Meta commerce catalog that is connected to the WhatsApp Business account.
@@ -34,6 +35,9 @@ import { lowestNightly, allBlockedRanges, priceString, priceLabel, roundPrice, c
 // or the last attempt failed. A full send (every field of every product) is POST /wa-catalog/sync?full=1.
 // GET /wa-catalog/inspect reads what Meta holds for each product (diagnosis, changes nothing).
 //
+// Offer badge: while a promotion runs for a property (custom_label_3 = offer) and WA_CATALOG_OFFER_BADGE allows it, the main photo is
+// the same photo with a red "SPECIAL OFFER" badge (offer-image.js). Only the main photo changes, the nine extra photos stay.
+//
 // Calm sending (see syncCatalog): tests on 7 November showed that a change of one field of one product (price, text or label) does
 // not take a product out of the WhatsApp list, but a send of ten products and a new product in one run did, for about two hours.
 // So a run sends at most WA_CATALOG_MAX_PER_RUN products (default 3) and a product that only moved a little in price waits.
@@ -52,6 +56,12 @@ const baliToday = () => {
 };
 const list = (v, d) => String(v || d).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
 const oneStepKeys = () => list(process.env.WA_CATALOG_IMAGES_ONE_STEP, '');
+// The red "SPECIAL OFFER" badge on the main photo while a promotion runs (see offer-image.js). Off unless WA_CATALOG_OFFER_BADGE is
+// "on" (all products with a running promotion) or a list of keys (only those).
+const offerBadgeWanted = (key) => {
+  const l = list(process.env.WA_CATALOG_OFFER_BADGE, '');
+  return l.includes('on') || l.includes('all') || l.includes(key);
+};
 
 const SITE = 'https://www.elevate-villas.com';
 
@@ -336,6 +346,15 @@ export async function buildProduct(prop, settings, special = null) {
   if (band && !special) payload.custom_label_2 = band;
   // A running promotion for this property (or for all): the label only, nothing the guest reads changes.
   if ((settings.promos || []).some((x) => x.property_key === 'all' || x.property_key === promoKey(key))) payload.custom_label_3 = OFFER_SET.value;
+  // The badge photo as the main photo while a promotion runs; the plain photo again when it has ended. If the badge photo cannot be
+  // made, the plain photo stays (a sync never fails because of a badge).
+  if (payload.custom_label_3 === OFFER_SET.value && offerBadgeWanted(key)) {
+    try {
+      payload.image_link = await offerImageUrl(retailerId, images[0]);
+    } catch (e) {
+      warnings.push(`Offer badge not made, the plain photo is used (${String(e.message || e).slice(0, 100)})`);
+    }
+  }
   // Experiment (see the top of the file): the extra photos also go into the batch, together with the main photo.
   if (oneStepKeys().includes(key) && images.length > 1) payload.additional_image_link = images.slice(1).join(',');
   return {
@@ -348,6 +367,7 @@ export async function buildProduct(prop, settings, special = null) {
     priceSource,
     base,
     imageCount: images.length,
+    mainImage: images[0], // the plain main photo, also when the badge photo is sent
     extraImages: images.slice(1),
     warnings,
     payload
@@ -448,7 +468,8 @@ async function ensureProductSets(catalog) {
  * old is the stored payload of the last send (it also carries __photos, the photo list, and __photosOk, whether the extra photos were set).
  */
 export function planItem(item, old, force = false) {
-  const photos = JSON.stringify([item.payload.image_link, ...item.extraImages]);
+  // The photo list is judged by the plain main photo: swapping in the badge photo must not set the extra photos again.
+  const photos = JSON.stringify([item.mainImage ?? item.payload.image_link, ...item.extraImages]);
   if (!old || force) return { data: item.payload, changed: Object.keys(item.payload), send: true, photos, needExtras: true };
   const { __photos, __photosOk, ...before } = old;
   const data = { id: item.retailerId };
