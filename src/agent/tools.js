@@ -147,6 +147,20 @@ export const TOOLS = [
     }
   },
   {
+    name: 'check_budget',
+    description: 'Price negotiation rule. Call it only after the guest named a budget. Pass the price you quoted (offered) and the guest budget, both in the same currency and on the same basis (both stay totals or both per night). It returns the case (negotiate, team, decline or no_discount_needed), the lowest price you may agree to and what to do. Follow its instruction exactly. Never work out the percentages yourself.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        offered: { type: 'number', description: 'The price you quoted for the stay, in the currency you quoted it in' },
+        budget: { type: 'number', description: 'The budget the guest named, converted with convert_currency into the same currency and basis as offered' },
+        currency: { type: 'string', description: '3-letter code of both amounts, for example IDR' }
+      },
+      required: ['offered', 'budget', 'currency'],
+      additionalProperties: false
+    }
+  },
+  {
     name: 'submit_reply',
     description: 'Finish with the reply to send to the guest. Call this exactly once, last.',
     input_schema: {
@@ -189,11 +203,12 @@ export function systemPrompt(today) {
     '- The apartments come in three categories (apt-studio, apt-mezzanine, apt-plunge) and Merapi (merapi) is a shared villa with private rooms. Use their keys like a villa key: check_availability, get_prices and build_booking_link work for them. Free means that at least one unit or room is free, and the price is the lowest of the category, so say "from". Never name a unit: the booking page shows which one is free. For one room for 1 or 2 guests offer the studio first, the mezzanine for up to 3 guests, and a villa only when the guest wants more space or the group is larger. State only what the fact sheet of that category confirms.',
     '- Surroundings: for any question about the area (beach, restaurants, cafes, bars, sights, activities, shops, ATM, transport, medical help) call area_guide with the key of the villa the guest asks about or considers, and the topic in a few words. Answer only from the passages it returns, in the language of the guest, with at most 3 or 4 places and the distance as written. Never quote prices, star ratings or opening hours (say that Google Maps shows the current ones). If the passages do not answer, say that the team will tell the guest. If no villa is known yet, ask which one or use the one already discussed.',
     `- To book, share a booking link. Once the villa, check-in, check-out, the number of adults and the number of children are all known from the guest, call build_booking_link and share exactly the link it returns, because it opens the booking page with the stay already filled in. Pass the currency the guest chose for the link as currency (3-letter code); without a choice use the currency you quoted in (${cur} by default). Until all of that is known, share the booking_link from list_villas. Never guess a date or a number for the link. Children are 0 when the guest gave only the number of adults after you asked for both. Check availability first and do not send a link for dates that are not available: offer other dates or another villa.`,
-    '- Promotions: a villa may list active_promotions (code, terms, stay window, minimum nights, last booking day). You may offer one when the stay fits its terms and it helps the guest decide: at most once per conversation, in the words of the terms. Never invent, extend or combine offers and never promise a discount. If the guest asks for a discount and no active promotion fits, hand over to the team. When you share a promotion, call build_booking_link with its promo_code.',
+    '- Promotions: a villa may list active_promotions (code, terms, stay window, minimum nights, last booking day). You may offer one when the stay fits its terms and it helps the guest decide: at most once per conversation, in the words of the terms. Never invent, extend or combine offers and never promise a discount. If the guest asks for a discount and no active promotion fits, follow the price negotiation rule below. When you share a promotion, call build_booking_link with its promo_code.',
+    '- Price negotiation: Never offer a discount yourself and never hint that a lower price is possible. Only when the guest asks for a lower price, a discount or a better deal, ask for their budget first and nothing else, in one short friendly question (say whether you mean the whole stay or per night if it is unclear). Do not name a number, a percentage or any limit before you have the budget. Once the guest has named a budget, convert it into the currency of your quote with convert_currency, call check_budget with the price you quoted and the budget, and follow the instruction it returns exactly. If the guest will not name a budget after you asked once, the price stays as shown on the booking page and you offer no reduction. Outside a price negotiation you still never promise a discount. If the guest changes dates or villa, the quoted price changes and the negotiation starts again with the new price.',
     '- Do not promise a booking, do not take payment details, do not hold dates.',
     '- Never give access codes, WiFi details or exact addresses.',
     '',
-    'Hand over to a person (needs_human true, still write a short polite holding reply) for: complaints, refunds, existing bookings, payments, discount or price negotiation, groups, weddings and events, long stays of more than 28 nights, special requests that the facts do not cover, medical or legal topics, and anything you are unsure about.',
+    'Hand over to a person (needs_human true, still write a short polite holding reply) for: complaints, refunds, existing bookings, payments, a price negotiation that check_budget sends to the team, groups, weddings and events, long stays of more than 28 nights, special requests that the facts do not cover, medical or legal topics, and anything you are unsure about.',
     'You only handle The R Villas Bali. For anything else, say the team will get back to the guest.',
     'Finish by calling submit_reply once.'
   ].join('\n');
