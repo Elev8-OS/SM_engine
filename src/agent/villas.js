@@ -28,7 +28,8 @@ export function villaView(p, multiUnit = false, promos = []) {
     uncertain_facts: f ? (f.open?.length ? f.open : undefined) : p.open_questions || undefined,
     active_promotions: promos.length ? promos.map(promoView) : undefined,
     booking_link: withUtm(p.url),
-    note: multiUnit ? 'Several units. The team confirms availability and prices.' : undefined
+    // A category of several units brings its own note (what "free" and the price mean for it).
+    note: p.note ?? (multiUnit ? 'Several units. The team confirms availability and prices.' : undefined)
   };
 }
 
@@ -46,7 +47,7 @@ export function linkResult(p, input, { multiUnit = false, promos = [] } = {}) {
     const code = normaliseCode(input.promo_code);
     const mine = promos.filter((x) => x.code === code);
     if (!mine.length) return { ok: false, note: `The code ${code} is not an active promotion. Do not offer it.` };
-    const fits = mine.map((x) => appliesTo(x, p.key, input.check_in, input.check_out));
+    const fits = mine.map((x) => appliesTo(x, p.promoKey ?? p.key, input.check_in, input.check_out));
     if (!fits.some((f) => f.ok)) return { ok: false, note: `${fits[0].why} Do not offer it for this stay.` };
     promo = code;
   }
@@ -62,7 +63,7 @@ export function linkResult(p, input, { multiUnit = false, promos = [] } = {}) {
       currency: input.currency ? String(input.currency).toUpperCase() : undefined,
       promo_code: promo,
       booking_link: url,
-      note: multiUnit ? 'Several units. Say the team confirms which unit is free.' : 'Share this link exactly as it is.'
+      note: p.linkNote ?? (multiUnit ? 'Several units. Say the team confirms which unit is free.' : 'Share this link exactly as it is.')
     };
   } catch (e) {
     return { ok: false, note: String(e.message || e) };

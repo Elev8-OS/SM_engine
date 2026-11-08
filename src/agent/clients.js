@@ -2,11 +2,15 @@ import { HttpError } from '../util.js';
 
 const GHL = 'https://services.leadconnectorhq.com';
 
-// PriceLabs listings of villas that are not in PRICELABS_LISTINGS (yet). The variable wins when it names the villa. Without these two
-// the assistant had no price for Bratan and Tambora and sent the guest to the team.
+// PriceLabs listings of villas that are not in PRICELABS_LISTINGS (yet). The variable wins when it names the villa. Without these
+// the assistant had no price for Bratan, Tambora and the apartments and sent the guest to the team.
 const PRICE_FALLBACK = {
   bratan: '60e9b31b-1313-45b9-9c61-13f9f5cc8cf4___7f7206ac-8595-40c4-8fca-c1394d350745',
-  tambora: 'a34cc21d-f853-488e-ba11-a42902a6b0aa___254a15a0-f81a-45a1-8bed-60b445933f81'
+  tambora: 'a34cc21d-f853-488e-ba11-a42902a6b0aa___254a15a0-f81a-45a1-8bed-60b445933f81',
+  // the apartment categories (one price list each)
+  'apt-studio': '49f64992-d0c0-4566-9edf-fe7ce185f36b___78adf636-26dc-4ea6-a9b1-c0acfd17d5ae',
+  'apt-mezzanine': '15a053e0-d4b8-491f-ae5b-fefcda8f8493___8c95568b-d972-40dc-99e3-4aa7c487ac86',
+  'apt-plunge': '1ed9c430-09bd-497e-816f-ca5837296b3f___4de7f331-6ebc-44ab-bfdb-92f6f405cd1d'
 };
 
 export function priceIds() {
