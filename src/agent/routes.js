@@ -9,7 +9,7 @@ import { areaGuide } from './area-guide.js';
 import { categoryOf, categoryRow, categoryRows, categoryAvailability, categoryPrices, enrich } from './multiunit.js';
 import { convert } from './currency.js';
 import { budgetCheck } from './negotiation.js';
-import { DEAL_TOOL, dealCodesOn, createDealCode, sitePriceTotal } from './deal-code.js';
+import { DEAL_TOOL, dealCodesOn, createDealCode } from './deal-code.js';
 import { livePromos, promoRoutes } from '../promos.js';
 import { readGuest, whyEmpty } from './read.js';
 import { loadSettings, saveSettings, settingsView, mayAutoSend } from './settings.js';
@@ -164,25 +164,9 @@ function dealDeps() {
     unsupported: (key) => categoryOf(key)?.kind === 'room',
     maxGuests,
     checkDates,
-    // The price Lea quotes, plus site_total: the sum of the PriceLabs price the booking page shows (see sitePriceTotal). The lowest list of a category counts.
-    quote: async (i) => {
-      const price = await execute('get_prices', i);
-      if (!price?.ok) return price;
-      try {
-        const p = await villa(i.villa);
-        const cat = categoryOf(p.key);
-        const ids = (cat ? cat.priceIds || cat.priceKeys.map((k) => priceIds()[k]) : [priceIds()[p.key]]).filter(Boolean);
-        const totals = [];
-        for (const id of ids) {
-          const { rows } = await pricelabsRows(id, i.check_in, i.check_out);
-          const t = sitePriceTotal(rows, i.check_in, i.check_out);
-          if (t !== null) totals.push(t);
-        }
-        return totals.length ? { ...price, site_total: Math.min(...totals) } : price;
-      } catch {
-        return price;
-      }
-    },
+    quote: (i) => execute('get_prices', i),
+    // Whether a code of ours with this name exists already (the codes Lea made are kept in agent_settings).
+    codeTaken: async (code) => (await q("select 1 from agent_settings where key like 'deal%' and value->>'code' = $1 limit 1", [code])).length > 0,
     convert,
     // The exact name in Elev8 the code is limited to. A villa is one listing. The units of an apartment category are separate rows in Elev8 that share one listing id,
     // and a code tied to one of those rows is refused on the booking page of another (seen on 8 Nov 2026), so categories get no restriction (null):
@@ -215,9 +199,10 @@ function promptFor(channel) {
   return `${base.replace('You answer Instagram direct messages.', 'You answer WhatsApp messages.')}\n${WA_PROMPT_NOTE}`;
 }
 
-function transcript(thread, latest) {
+function transcript(thread, latest, guestName) {
   const lines = (thread || []).slice(-12).map((m) => `${m.direction === 'inbound' ? 'Guest' : 'Team'}: ${m.body}`.trim()).filter((l) => l.length > 7);
-  return [lines.length ? `Conversation so far (oldest first):\n${lines.join('\n')}\n` : '', `Latest guest message:\n${latest}`].join('\n');
+  const name = String(guestName || '').trim();
+  return [name ? `Guest name on the contact (may be a phone number or incomplete): ${name}\n` : '', lines.length ? `Conversation so far (oldest first):\n${lines.join('\n')}\n` : '', `Latest guest message:\n${latest}`].filter(Boolean).join('\n');
 }
 
 async function sendRow(id, message) {
@@ -292,7 +277,7 @@ export async function processInquiry(id, { auto = false } = {}) {
     const unreadable = channel === 'whatsapp' && NOT_READABLE.test(guestText);
     const result = unreadable
       ? { reply: UNREADABLE_REPLY, needs_human: true, reason: 'Voice message, photo or another message the assistant cannot read', intent: 'other', language: 'en', trace: [] }
-      : await runAgent({ system: promptFor(channel), userText: transcript(history, guestText), tools: agentTools(), callModel, execute: executeFor(channel) });
+      : await runAgent({ system: promptFor(channel), userText: transcript(history, guestText, row.contact_name), tools: agentTools(), callModel, execute: executeFor(channel) });
     let needsHuman = result.needs_human || !result.reply;
     let reason = result.reason;
     // A WhatsApp reply outside the 24-hour window would be refused: a template is needed, so a person decides.
@@ -398,7 +383,7 @@ export function agentPrivate(app, needDb, ah) {
   app.get('/agent/deal-code-test', needDb, ah(async (req, res) => {
     await ensureSchema();
     const b = req.query;
-    const input = { villa: b.villa, check_in: b.check_in, check_out: b.check_out, adults: Number(b.adults || 2), children: Number(b.children || 0), agreed_price: Number(b.agreed), basis: b.basis === 'per_night' ? 'per_night' : 'total', currency: b.currency || 'IDR' };
+    const input = { villa: b.villa, check_in: b.check_in, check_out: b.check_out, adults: Number(b.adults || 2), children: Number(b.children || 0), agreed_price: Number(b.agreed), basis: b.basis === 'per_night' ? 'per_night' : 'total', currency: b.currency || 'IDR', guest_name: b.name };
     const create = b.create === '1' && b.confirm === '1';
     res.json(await createDealCode(input, dealDeps(), { dryRun: !create, force: true, testOnly: b.test === '1' }));
   }));
