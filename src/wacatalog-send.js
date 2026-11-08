@@ -45,7 +45,8 @@ export async function productsInText(text) {
 
 /** The interactive object: one product, or a list (at most 10 villas here, WhatsApp allows 30). */
 export function productInteractive(catalog, ids, text) {
-  if (ids.length === 1) return { type: 'product', body: { text }, action: { catalog_id: catalog, product_retailer_id: ids[0] } };
+  // One product needs no text (the card shows photo, title and price); a list needs one.
+  if (ids.length === 1) return { type: 'product', ...(text ? { body: { text } } : {}), action: { catalog_id: catalog, product_retailer_id: ids[0] } };
   return { type: 'product_list', header: { type: 'text', text: 'Villas for your dates' }, body: { text }, action: { catalog_id: catalog, sections: [{ title: 'Villas', product_items: ids.slice(0, 10).map((id) => ({ product_retailer_id: id })) }] } };
 }
 
@@ -129,6 +130,6 @@ export function sendRoutes(app, needDb, ah) {
     if (String(req.query.confirm || '') !== '1') throw new HttpError(400, 'This sends one WhatsApp product message to the number you name. Add confirm=1.');
     const keys = String(req.query.key || '').split(',').map((s) => s.trim()).filter(Boolean);
     if (!keys.length) throw new HttpError(400, 'key is required, for example key=masurai');
-    res.json(await sendProductMessage({ to: String(req.query.to || ''), keys, text: String(req.query.text || 'Here is the villa from our catalog. Tap to see photos and the price.').slice(0, 300) }));
+    res.json(await sendProductMessage({ to: String(req.query.to || ''), keys, text: String(req.query.notext || '') === '1' ? '' : String(req.query.text || 'Here is the villa from our catalog. Tap to see photos and the price.').slice(0, 300) }));
   }));
 }

@@ -107,7 +107,8 @@ async function followWithProducts(contactId, message) {
   if (!ids.length) return { ok: true, skipped: 'no villa link in the reply' };
   const to = await contactPhone(contactId);
   if (!to) return { ok: false, error: 'the contact has no phone number' };
-  const r = await postProducts(to, ids, ids.length > 1 ? 'Tap to see the photos and prices.' : 'Tap to see the photos and the price.');
+  // One villa: the card alone (photo, title, price). Several villas: a list, which needs a short text.
+  const r = await postProducts(to, ids, ids.length > 1 ? 'Tap to see the photos and prices.' : '');
   if (!r.ok) console.error('WhatsApp product message not sent:', JSON.stringify(r).slice(0, 300));
   return r;
 }
