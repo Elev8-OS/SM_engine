@@ -54,7 +54,7 @@ await t('codes: format and no look-alike characters', () => {
   for (let i = 0; i < 200; i++) assert.match(makeCode(), /^LEA-[A-HJ-NP-Z2-9]{6}$/);
   assert.notEqual(makeCode(), makeCode());
 });
-await t('promo arguments: one use, one villa, the one stay, valid two days', () => {
+await t('promo arguments: one use, one villa, the one stay, valid until the next day', () => {
   const a = promoArgs({ website: 'www.elevate-villas.com', code: 'LEA-ABC234', percent: 7.78, listingName: 'X', checkIn: '2026-12-01', today: '2026-11-10' });
   assert.equal(a.quota, 1);
   assert.equal(a.quota_per_user, 1);
@@ -62,14 +62,16 @@ await t('promo arguments: one use, one villa, the one stay, valid two days', () 
   assert.equal(a.percentage_discount, 7.78);
   assert.deepEqual(a.listings, ['X']);
   assert.equal(a.booking_from_date, '2026-11-10');
-  assert.equal(a.booking_until_date, '2026-11-12');
+  assert.equal(a.booking_until_date, '2026-11-11');
   assert.equal(a.stay_from_date, '2026-12-01');
   assert.equal(a.stay_until_date, '2026-12-01');
   // every field the Elev8 tool requires is present
   for (const k of ['booking_from_date', 'booking_until_date', 'currency', 'description', 'discount_amount', 'discount_kind', 'listings', 'name', 'percentage_discount', 'promo_code', 'quota', 'quota_per_user', 'stay_from_date', 'stay_until_date', 'upsell', 'upsell_item', 'website']) assert.ok(k in a, k);
 });
 await t('promo arguments: the window ends at check-in at the latest; a test code is already expired', () => {
-  assert.equal(promoArgs({ website: 'w', code: 'C', percent: 5, listingName: 'X', checkIn: '2026-11-11', today: '2026-11-10' }).booking_until_date, '2026-11-11');
+  assert.equal(promoArgs({ website: 'w', code: 'C', percent: 5, listingName: 'X', checkIn: '2026-11-10', today: '2026-11-10' }).booking_until_date, '2026-11-10');
+  // never longer than the next day, however far away the stay is
+  assert.equal(promoArgs({ website: 'w', code: 'C', percent: 5, listingName: 'X', checkIn: '2027-03-01', today: '2026-11-10' }).booking_until_date, '2026-11-11');
   const x = promoArgs({ website: 'w', code: 'C', percent: 1, listingName: 'X', checkIn: '2026-12-01', today: '2026-11-10', testOnly: true });
   assert.ok(x.booking_until_date < '2026-11-10' && x.booking_from_date < x.booking_until_date);
 });
@@ -95,6 +97,11 @@ await t('creates one code and returns the link with the code in it', async () =>
   assert.equal(u.searchParams.get('check_in_date'), '2026-12-01');
   assert.equal(u.searchParams.get('number_of_adult'), '2');
   assert.ok(r.single_use);
+  assert.equal(r.valid_until, '2026-11-11');
+  // the guest is told: valid until the next day, no booking without payment, not held for others
+  assert.match(r.note, /valid until 2026-11-11/);
+  assert.match(r.note, /never confirmed without a completed payment/);
+  assert.match(r.note, /booked by someone else/);
   assert.equal(calls.saved.length, 1);
 });
 await t('per night price is multiplied by the nights', async () => {

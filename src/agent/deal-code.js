@@ -8,7 +8,8 @@ import { bookingLink, DM_UTM, isDate, nightsBetween } from './tools.js';
 export const dealCodesOn = (env = process.env) => String(env.DEAL_CODES || '').toLowerCase() === 'on';
 const SITE = (env = process.env) => env.DEAL_CODE_WEBSITE || 'www.elevate-villas.com';
 const PER_DAY = (env = process.env) => Math.max(1, Number(env.DEAL_CODES_PER_DAY) || 10);
-const VALID_DAYS = 2;
+// The code is valid until the next day at the latest.
+const VALID_DAYS = 1;
 // Rounding of the guest's price may push the discount a hair above 10%: up to this it is clamped to 10, beyond it the team decides.
 const TOLERANCE_PCT = 0.1;
 
@@ -54,7 +55,7 @@ export function makeCode(bytes = crypto.randomBytes(6)) {
 
 const addDays = (day, n) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
 
-/** Arguments of Elev8's create_promo_code: one use, one villa, the one stay, valid for two days. */
+/** Arguments of Elev8's create_promo_code: one use, one villa, the one stay, valid until the next day at the latest. */
 export function promoArgs({ website, code, percent, listingName, checkIn, today, testOnly = false }) {
   // A test code is created already expired: it proves that creating works and can never be redeemed.
   const from = testOnly ? addDays(today, -2) : today;
@@ -121,7 +122,7 @@ export async function createDealCode(input, deps, { dryRun = false, force = fals
     let code;
     let reused = false;
     if (!dryRun) {
-      const [hit] = await deps.q("select value from agent_settings where key = $1 and updated_at > now() - interval '48 hours'", [dedupe]);
+      const [hit] = await deps.q("select value from agent_settings where key = $1 and updated_at > now() - interval '24 hours'", [dedupe]);
       if (hit?.value?.code && !testOnly) {
         code = hit.value.code;
         reused = true;
@@ -158,7 +159,8 @@ export async function createDealCode(input, deps, { dryRun = false, force = fals
       valid_until: args.booking_until_date,
       booking_link: link,
       note:
-        `Share booking_link exactly: the code ${code} is already in it. Tell the guest it works for this one booking only and is valid until ${args.booking_until_date}. The booking page should show about ${plan.expected_price} ${cur} for the stay (the page converts currencies with its own rate, so a small difference is possible: say "about"). ` +
+        `Share booking_link exactly: the code ${code} is already in it. Tell the guest all of this, in the guest's language and in your own words: (1) the code works for this one booking only and is valid until ${args.booking_until_date}; (2) a booking is never confirmed without a completed payment; (3) until the payment is made, the villa can still be booked by someone else, so the dates are not held. ` +
+        `The booking page should show about ${plan.expected_price} ${cur} for the stay (the page converts currencies with its own rate, so a small difference is possible: say "about"). ` +
         `${plan.clamped ? 'The limit was reached, so the price is the lowest allowed: use expected_price in your message. ' : ''}` +
         `Call submit_reply with needs_human false and a short reason that names the code, the villa, the dates and the agreed price.`
     };
