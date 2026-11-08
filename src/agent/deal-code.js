@@ -1,0 +1,168 @@
+// One-time promo code for a price Lea agreed with a guest. The code gives a percentage discount, so the booking page
+// (which converts currencies with its own rates) shows the agreed price in any currency.
+// The percentage is worked out here from the real price, never by the model, and the 10% limit of the negotiation rule is enforced here too.
+import crypto from 'node:crypto';
+import { NEGOTIATE_MAX_PCT } from './negotiation.js';
+import { bookingLink, DM_UTM, isDate, nightsBetween } from './tools.js';
+
+export const dealCodesOn = (env = process.env) => String(env.DEAL_CODES || '').toLowerCase() === 'on';
+const SITE = (env = process.env) => env.DEAL_CODE_WEBSITE || 'www.elevate-villas.com';
+const PER_DAY = (env = process.env) => Math.max(1, Number(env.DEAL_CODES_PER_DAY) || 10);
+const VALID_DAYS = 2;
+// Rounding of the guest's price may push the discount a hair above 10%: up to this it is clamped to 10, beyond it the team decides.
+const TOLERANCE_PCT = 0.1;
+
+export const DEAL_TOOL = {
+  name: 'create_deal_code',
+  description:
+    'Creates a one-time promo code that gives the agreed price on the booking page, and returns the booking link with the code already in it. Call it only after the guest has accepted a concrete price that check_budget allowed, never to offer a discount. The server works out the percentage and refuses anything beyond the limit. Share the returned booking_link exactly and follow its note.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      villa: { type: 'string', description: 'Villa key from list_villas' },
+      check_in: { type: 'string', description: 'YYYY-MM-DD' },
+      check_out: { type: 'string', description: 'YYYY-MM-DD, the departure day' },
+      adults: { type: 'integer', description: 'Number of adults, at least 1' },
+      children: { type: 'integer', description: 'Number of children, 0 or more' },
+      agreed_price: { type: 'number', description: 'The price the guest accepted, in the currency of currency' },
+      basis: { type: 'string', enum: ['total', 'per_night'], description: 'Whether agreed_price is for the whole stay or per night' },
+      currency: { type: 'string', description: '3-letter code of agreed_price and of the link, for example IDR' }
+    },
+    required: ['villa', 'check_in', 'check_out', 'adults', 'children', 'agreed_price', 'basis', 'currency'],
+    additionalProperties: false
+  }
+};
+
+/** The discount for an agreed price. offered and agreed are in the same currency, both for the whole stay. */
+export function planDeal({ offered, agreed } = {}) {
+  const o = Number(offered);
+  const a = Number(agreed);
+  if (!(o > 0) || !(a > 0)) return { ok: false, note: 'offered and agreed must be positive numbers' };
+  if (a >= o) return { ok: false, note: 'The agreed price is not below the price shown. No code is needed: share the normal booking link.' };
+  const pct = Math.round((1 - a / o) * 1e6) / 1e4; // percent, four decimals
+  if (pct > NEGOTIATE_MAX_PCT + TOLERANCE_PCT) return { ok: false, note: `That is more than ${NEGOTIATE_MAX_PCT}% below the price shown. Do not confirm it: the team decides.`, percent_under_offer: pct };
+  const clamped = pct > NEGOTIATE_MAX_PCT;
+  const percent = clamped ? NEGOTIATE_MAX_PCT : Math.min(Math.ceil(pct * 100) / 100, NEGOTIATE_MAX_PCT);
+  return { ok: true, percent, clamped, expected_price: Math.round(o * (1 - percent / 100)), offered: Math.round(o) };
+}
+
+const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+/** LEA-XXXXXX, no look-alike characters. */
+export function makeCode(bytes = crypto.randomBytes(6)) {
+  return `LEA-${Array.from(bytes, (b) => ALPHABET[b % ALPHABET.length]).join('')}`;
+}
+
+const addDays = (day, n) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
+
+/** Arguments of Elev8's create_promo_code: one use, one villa, the one stay, valid for two days. */
+export function promoArgs({ website, code, percent, listingName, checkIn, today, testOnly = false }) {
+  // A test code is created already expired: it proves that creating works and can never be redeemed.
+  const from = testOnly ? addDays(today, -2) : today;
+  const until = testOnly ? addDays(today, -1) : addDays(today, VALID_DAYS) < checkIn ? addDays(today, VALID_DAYS) : checkIn;
+  return {
+    website,
+    promo_code: code,
+    name: `Lea ${code}`,
+    description: 'Special direct-booking price for this stay. Single use, not combinable with other offers.',
+    discount_kind: 1,
+    percentage_discount: percent,
+    discount_amount: 0,
+    currency: '',
+    upsell: '',
+    upsell_item: '',
+    quota: 1,
+    quota_per_user: 1,
+    listings: [listingName],
+    booking_from_date: from,
+    booking_until_date: until,
+    stay_from_date: checkIn,
+    stay_until_date: checkIn
+  };
+}
+
+const keyOf = (v) => crypto.createHash('sha1').update(v).digest('hex').slice(0, 20);
+
+/**
+ * Orchestrates one deal code. deps are injected so the logic is testable without network:
+ * villa(key), isCategory(key), maxGuests(p), checkDates(input), quote(input) -> price summary, convert({amount,from,to}),
+ * listingName(p, checkIn), elev8(name, args), q(sql, params), today(), env.
+ * Never throws: a problem comes back as a note for the model. force skips the DEAL_CODES switch (manual test route).
+ */
+export async function createDealCode(input, deps, { dryRun = false, force = false, testOnly = false } = {}) {
+  const env = deps.env || process.env;
+  const fail = (note) => ({ ok: false, note: `${note} Say the team will send the code and hand over to the team (needs_human true) with the agreed price.` });
+  try {
+    if (!force && !dealCodesOn(env)) return fail('Deal codes are switched off.');
+    const p = await deps.villa(input.villa);
+    if (deps.isCategory(p.key)) return fail('Deal codes are not available for apartments and Merapi yet.');
+    const { ci, co } = deps.checkDates(input);
+    const nights = nightsBetween(ci, co).length;
+    const adults = Number(input.adults);
+    const children = Number(input.children ?? 0);
+    const max = deps.maxGuests(p);
+    if (max && adults + children > max) return { ok: false, note: `${p.name} sleeps up to ${max} guests. Do not send a link for it.` };
+    const cur = String(input.currency || '').toUpperCase();
+    if (!/^[A-Z]{3}$/.test(cur)) return fail('The currency is missing.');
+    const agreedIn = Number(input.agreed_price);
+    if (!(agreedIn > 0)) return fail('The agreed price is missing.');
+    const agreed = input.basis === 'per_night' ? agreedIn * nights : agreedIn;
+
+    // What the booking page asks for this stay: the same price Lea quoted (stay total, with fees where a fact sheet has them), in the currency of the agreement.
+    const price = await deps.quote({ villa: p.key, check_in: ci, check_out: co });
+    if (!price?.ok) return fail('No price is available for these dates.');
+    const offeredCHF = price.total_incl_fees ?? price.total;
+    const conv = price.currency === cur ? { ok: true, converted: offeredCHF } : await deps.convert({ amount: offeredCHF, from: price.currency, to: cur });
+    if (!conv.ok) return fail('The price could not be converted.');
+    const plan = planDeal({ offered: conv.converted, agreed });
+    if (!plan.ok) return plan.percent_under_offer ? fail(plan.note) : { ok: false, note: plan.note };
+
+    const day = deps.today();
+    const dedupe = `${testOnly ? 'deal-test' : 'deal'}:${keyOf([p.key, ci, co, Math.round(agreed), cur, adults, children].join('|'))}`;
+    let code;
+    let reused = false;
+    if (!dryRun) {
+      const [hit] = await deps.q("select value from agent_settings where key = $1 and updated_at > now() - interval '48 hours'", [dedupe]);
+      if (hit?.value?.code && !testOnly) {
+        code = hit.value.code;
+        reused = true;
+      }
+      if (!code) {
+        const [{ n }] = await deps.q("select count(*)::int as n from agent_settings where key like 'deal:%' and updated_at > now() - interval '24 hours'");
+        if (n >= PER_DAY(env)) return fail('The daily limit of deal codes is reached.');
+      }
+    }
+    const listingName = await deps.listingName(p, ci);
+    if (!listingName) return fail('The villa was not found in Elev8.');
+    code = code || makeCode();
+    const args = promoArgs({ website: SITE(env), code, percent: plan.percent, listingName, checkIn: ci, today: day, testOnly });
+    if (dryRun) return { ok: true, dry_run: true, plan, offered_in_currency: Math.round(conv.converted), currency: cur, agreed_total: Math.round(agreed), nights, create_promo_code_args: args };
+
+    if (!reused) {
+      try {
+        await deps.elev8('create_promo_code', args);
+      } catch (e) {
+        return fail(`The code could not be created (${String(e.message || e).slice(0, 120)}).`);
+      }
+      await deps.q("insert into agent_settings (key, value, updated_at) values ($1, $2, now()) on conflict (key) do update set value = excluded.value, updated_at = now()", [dedupe, JSON.stringify({ code, villa: p.key, check_in: ci, check_out: co, percent: plan.percent, agreed: Math.round(agreed), currency: cur, test: testOnly })]);
+    }
+    if (testOnly) return { ok: true, test_only: true, promo_code: code, percent: plan.percent, note: 'Test code created already expired. It cannot be redeemed.' };
+    const link = bookingLink(p.url, { checkIn: ci, checkOut: co, adults, children, currency: cur, promo: code }, DM_UTM);
+    return {
+      ok: true,
+      villa: p.name,
+      promo_code: code,
+      percent_off: plan.percent,
+      expected_price: plan.expected_price,
+      currency: cur,
+      single_use: true,
+      valid_until: args.booking_until_date,
+      booking_link: link,
+      note:
+        `Share booking_link exactly: the code ${code} is already in it. Tell the guest it works for this one booking only and is valid until ${args.booking_until_date}. The booking page should show about ${plan.expected_price} ${cur} for the stay (the page converts currencies with its own rate, so a small difference is possible: say "about"). ` +
+        `${plan.clamped ? 'The limit was reached, so the price is the lowest allowed: use expected_price in your message. ' : ''}` +
+        `Call submit_reply with needs_human false and a short reason that names the code, the villa, the dates and the agreed price.`
+    };
+  } catch (e) {
+    return fail(String(e.message || e).slice(0, 160));
+  }
+}
