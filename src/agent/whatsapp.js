@@ -4,6 +4,8 @@
 // messages that were sent TO the sales number (WA_AGENT_NUMBER), and only when WA_AGENT_ENABLED is on. Anything else is ignored.
 // It starts as drafts for the team: automatic sending needs WA_AGENT_AUTO_SEND=on on top of the answer mode of the SM Manager.
 
+import { productMessagesOn, productsInText, postProducts } from '../wacatalog-send.js';
+
 const GHL = 'https://services.leadconnectorhq.com';
 
 export const digits = (s) => String(s || '').replace(/\D/g, '');
@@ -88,11 +90,35 @@ export async function getThreadFull(conversationId, limit = 20) {
     .sort((a, b) => String(a.at).localeCompare(String(b.at)));
 }
 
+/** The phone number of a GHL contact (digits), or '' when there is none. */
+async function contactPhone(contactId) {
+  const res = await fetch(`${GHL}/contacts/${encodeURIComponent(contactId)}`, { headers: { ...headers(), Version: '2021-07-28' }, signal: AbortSignal.timeout(30000) });
+  const json = await res.json().catch(() => ({}));
+  return res.ok ? digits(json?.contact?.phone) : '';
+}
+
+/**
+ * After the text reply: the villa(s) the reply links to go into the chat as a product message (photo, title, price, a button).
+ * Only with WA_PRODUCT_MESSAGES on, and never a reason for the text reply to fail: the result says what happened.
+ * The message goes through the WhatsApp API of Meta, not through GHL, so GHL does not show it in the conversation.
+ */
+async function followWithProducts(contactId, message) {
+  const ids = await productsInText(message);
+  if (!ids.length) return { ok: true, skipped: 'no villa link in the reply' };
+  const to = await contactPhone(contactId);
+  if (!to) return { ok: false, error: 'the contact has no phone number' };
+  const r = await postProducts(to, ids, ids.length > 1 ? 'Tap to see the photos and prices.' : 'Tap to see the photos and the price.');
+  if (!r.ok) console.error('WhatsApp product message not sent:', JSON.stringify(r).slice(0, 300));
+  return r;
+}
+
 /** Send a WhatsApp message from the sales number. Only inside the 24-hour window; GHL answers with an error otherwise. */
 export async function sendWhatsApp(contactId, message) {
   const { number } = waSettings();
   if (!number) throw new Error('WA_AGENT_NUMBER is not set');
   const res = await fetch(`${GHL}/conversations/messages`, { method: 'POST', headers: headers(), body: JSON.stringify({ type: 'WhatsApp', contactId, message, fromNumber: `+${number}` }), signal: AbortSignal.timeout(30000) });
   const json = await res.json().catch(() => ({}));
-  return { ok: res.ok, status: res.status, messageId: json.messageId || json.id || null, response: res.ok ? undefined : json };
+  const out = { ok: res.ok, status: res.status, messageId: json.messageId || json.id || null, response: res.ok ? undefined : json };
+  if (res.ok && productMessagesOn()) out.products = await followWithProducts(contactId, message).catch((e) => ({ ok: false, error: String(e.message || e).slice(0, 200) }));
+  return out;
 }

@@ -11,22 +11,50 @@ import { catalogId, waCatalogSettings } from './wacatalog.js';
 const VERSION = process.env.META_GRAPH_VERSION || 'v25.0';
 const digits = (s) => String(s || '').replace(/\D/g, '');
 
+// The sales assistant sends a product message after its text reply when WA_PRODUCT_MESSAGES is on (off by default): the villa(s) whose
+// booking page the reply links to. The text and the link stay, so a guest still gets the link if the product message is refused.
+export const productMessagesOn = () => /^(true|1|yes|on)$/i.test(String(process.env.WA_PRODUCT_MESSAGES || '').replace(/["'\s]/g, ''));
+
+/** The catalog products whose booking page (the path of the link) appears in a text. Pure; rows are { retailer_id, link }. At most 10. */
+export function matchProducts(text, rows) {
+  const paths = new Set();
+  for (const m of String(text || '').match(/https?:\/\/[^\s)>\]]+/g) || []) {
+    try {
+      paths.add(new URL(m).pathname.replace(/\/+$/, ''));
+    } catch {
+      // not a link
+    }
+  }
+  const out = [];
+  for (const r of rows) {
+    try {
+      if (r.link && paths.has(new URL(r.link).pathname.replace(/\/+$/, '')) && !out.includes(r.retailer_id)) out.push(r.retailer_id);
+    } catch {
+      // a product without a usable link
+    }
+  }
+  return out.slice(0, 10);
+}
+
+export async function productsInText(text) {
+  const rows = await q(`select retailer_id, payload->>'link' as link from wa_catalog_items`);
+  return matchProducts(text, rows);
+}
+
 /** The interactive object: one product, or a list (at most 10 villas here, WhatsApp allows 30). */
 export function productInteractive(catalog, ids, text) {
   if (ids.length === 1) return { type: 'product', body: { text }, action: { catalog_id: catalog, product_retailer_id: ids[0] } };
   return { type: 'product_list', header: { type: 'text', text: 'Villas for your dates' }, body: { text }, action: { catalog_id: catalog, sections: [{ title: 'Villas', product_items: ids.slice(0, 10).map((id) => ({ product_retailer_id: id })) }] } };
 }
 
-export async function sendProductMessage({ to, keys, text }) {
+/** Posts one product message (one product, or a list) to a number. Returns { ok, ... } and never throws on a refusal by Meta. */
+export async function postProducts(to, ids, text) {
   const phoneId = waCatalogSettings().phoneId;
   const catalog = await catalogId();
   const token = process.env.META_ADS_TOKEN;
   if (!phoneId || !catalog || !token) throw new HttpError(409, 'META_WA_PHONE_ID, the catalog or META_ADS_TOKEN is missing');
   const num = digits(to);
   if (num.length < 8 || num.length > 15) throw new HttpError(400, 'to must be a phone number with country code, digits only');
-  const rows = await q('select retailer_id, property_key from wa_catalog_items where property_key = any($1)', [keys]);
-  if (!rows.length) throw new HttpError(404, 'No catalog product for these villas');
-  const ids = rows.map((r) => r.retailer_id);
   const body = { messaging_product: 'whatsapp', recipient_type: 'individual', to: num, type: 'interactive', interactive: productInteractive(catalog, ids, text) };
   const res = await fetch(`https://graph.facebook.com/${VERSION}/${phoneId}/messages`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(30000) });
   const json = await res.json().catch(() => ({}));
@@ -35,6 +63,12 @@ export async function sendProductMessage({ to, keys, text }) {
     return { ok: false, status: res.status, code: e.code, subcode: e.error_subcode, message: String(e.message || '').slice(0, 250), detail: String(e.error_data?.details || e.error_user_msg || '').slice(0, 250), products: ids };
   }
   return { ok: true, products: ids, to: `${num.slice(0, 4)}…${num.slice(-2)}`, messageId: json.messages?.[0]?.id ?? null };
+}
+
+export async function sendProductMessage({ to, keys, text }) {
+  const rows = await q('select retailer_id, property_key from wa_catalog_items where property_key = any($1)', [keys]);
+  if (!rows.length) throw new HttpError(404, 'No catalog product for these villas');
+  return postProducts(to, rows.map((r) => r.retailer_id), text);
 }
 
 export function sendRoutes(app, needDb, ah) {
