@@ -35,6 +35,9 @@ import { lowestNightly, allBlockedRanges, priceString, priceLabel, roundPrice, c
 // or the last attempt failed. A full send (every field of every product) is POST /wa-catalog/sync?full=1.
 // GET /wa-catalog/inspect reads what Meta holds for each product (diagnosis, changes nothing).
 //
+// Main photos change at night only (inImageWindow, Bali 1-6 h): the badge goes on or off for a product in the night, because a new
+// main photo takes the product out of the WhatsApp list for a while. Everything else is sent in the day as before.
+//
 // Offer badge: while a promotion runs for a property (custom_label_3 = offer) and WA_CATALOG_OFFER_BADGE allows it, the main photo is
 // the same photo with a red "SPECIAL OFFER" badge (offer-image.js). Only the main photo changes, the nine extra photos stay.
 //
@@ -62,6 +65,22 @@ const offerBadgeWanted = (key) => {
   const l = list(process.env.WA_CATALOG_OFFER_BADGE, '');
   return l.includes('on') || l.includes('all') || l.includes(key);
 };
+
+// A change of the main photo (the badge on or off) takes a product out of the WhatsApp list for a while. So a main photo is changed only
+// at night, in a window of Bali time (WA_CATALOG_IMAGE_HOURS, default 1-6; "any" switches the rule off). Price, label and availability
+// are not held back. A held photo waits in the stored copy, and the nightly check below runs a sync inside the window.
+const imageWindow = () => {
+  const raw = String(process.env.WA_CATALOG_IMAGE_HOURS || '1-6').trim().toLowerCase();
+  if (/^(any|always|off)$/.test(raw)) return null;
+  const m = /^(\d{1,2})\s*-\s*(\d{1,2})$/.exec(raw);
+  return m ? [Number(m[1]) % 24, Number(m[2]) % 24] : [1, 6];
+};
+export function inImageWindow(now = Date.now()) {
+  const w = imageWindow();
+  if (!w) return true;
+  const h = new Date(now + 8 * 3600 * 1000).getUTCHours();
+  return w[0] <= w[1] ? h >= w[0] && h < w[1] : h >= w[0] || h < w[1];
+}
 
 const SITE = 'https://www.elevate-villas.com';
 
@@ -496,8 +515,9 @@ export function planItem(item, old, force = false) {
 /**
  * Build the products and either show them (dryRun, nothing is written) or send them to the catalog in one batch.
  * A villa that cannot be built is left out and listed under errors; the rest is still sent.
+ * imagesNow: change main photos now, outside the night window too (a manual run).
  */
-export async function syncCatalog({ dryRun = false, force = false } = {}) {
+export async function syncCatalog({ dryRun = false, force = false, imagesNow = false } = {}) {
   await ensureTables();
   const catalog = await catalogId();
   const built = await buildAll();
@@ -506,6 +526,21 @@ export async function syncCatalog({ dryRun = false, force = false } = {}) {
   if (!built.items.length) throw new HttpError(409, `Nothing to send: ${built.errors.map((e) => `${e.villa}: ${e.error}`).join(' | ') || 'no villas configured'}`);
 
   const before = new Map((await q('select retailer_id, payload from wa_catalog_items')).map((r) => [r.retailer_id, r.payload || null]));
+  // Main photos change only at night (see inImageWindow): outside the window a changed main photo is held back, the product keeps the
+  // photo of the last send. New products and a full send are not held.
+  let held = 0;
+  if (!force && !imagesNow && !inImageWindow()) {
+    for (const i of built.items) {
+      const old = before.get(i.retailerId);
+      if (old?.image_link && i.payload.image_link !== old.image_link) {
+        i.payload.image_link = old.image_link;
+        // The offer label goes with the photo: a badge never stays up (or is missing) with the label the other way round.
+        if (old.custom_label_3) i.payload.custom_label_3 = old.custom_label_3;
+        else delete i.payload.custom_label_3;
+        held += 1;
+      }
+    }
+  }
   const plan = built.items.map((i) => ({ i, ...planItem(i, before.get(i.retailerId) || null, force), prev: before.get(i.retailerId) || null }));
 
   // Calm sending. WhatsApp takes products out of its list for a while when many of them change at once (seen after a send of ten
@@ -557,6 +592,10 @@ export async function syncCatalog({ dryRun = false, force = false } = {}) {
   const unchanged = plan.length - toSend.length - waiting;
   if (unchanged) notes.push(`${unchanged} of ${plan.length} products did not change and were not sent`);
   if (waiting) notes.push(`${waiting} products wait for a later run (a small price move, or more than ${maxPerRun} products due in this run)`);
+  // Main photos still to change (held outside the night window, or cut by the limit per run): the nightly check runs a sync for them.
+  const pendingImages = held + plan.filter((p) => p.waiting && p.changed.includes('image_link')).length;
+  if (held) notes.push(`${held} main photos are held until the night window (Bali ${imageWindow()?.join('-')} h)`);
+  await setState('imageHold', { held: pendingImages, at: new Date().toISOString() });
   notes.push(...(await ensureProductSets(catalog)));
 
   for (const p of plan) {
@@ -659,7 +698,11 @@ export function startWaCatalogSync() {
       if (!dbEnabled() || !waCatalogSettings().auto) return;
       if (!(await catalogId())) return;
       const last = await getState('lastSync');
-      if (last?.at && Date.now() - Date.parse(last.at) < SYNC_EVERY_MS) return;
+      const hold = await getState('imageHold');
+      // Inside the night window a sync also runs when main photos are waiting (every hour at the latest, so a window of five hours
+      // sends up to five packages of at most WA_CATALOG_MAX_PER_RUN products).
+      const nightDue = Number(hold?.held) > 0 && inImageWindow() && (!last?.at || Date.now() - Date.parse(last.at) > 45 * 60 * 1000);
+      if (last?.at && Date.now() - Date.parse(last.at) < SYNC_EVERY_MS && !nightDue) return;
       await syncCatalog();
     } catch (e) {
       console.error('WhatsApp catalog sync failed:', e.message);
