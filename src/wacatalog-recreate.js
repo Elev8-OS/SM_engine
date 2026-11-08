@@ -75,13 +75,13 @@ export async function recreateProducts(keys) {
 
 /**
  * What Meta says about the review of each product (changes nothing). One short line per product, because the probe of the SM
- * engine keeps only the first part of an answer:  <key>:<review status>|<rejection reasons>|<visibility>|<label 3>
+ * engine keeps only the first part of an answer:  <key>:<review status>|<rejection reasons>|<visibility>|<label 3>|<badge or plain main photo>
  * Each field is asked for on its own, so a field Meta does not know cannot spoil the others ("-" means: not returned).
  */
 export async function reviewCatalog() {
   const catalog = await catalogId();
   if (!catalog) throw new HttpError(409, 'There is no catalog yet');
-  const fields = ['review_status', 'review_rejection_reasons', 'visibility', 'custom_label_3'];
+  const fields = ['review_status', 'review_rejection_reasons', 'visibility', 'custom_label_3', 'image_url'];
   const rows = new Map();
   const notes = [];
   for (const f of fields) {
@@ -101,7 +101,7 @@ export async function reviewCatalog() {
   const val = (v) => (v === undefined || v === null || v === '' ? '-' : Array.isArray(v) ? v.join('+') || '-' : String(v));
   const short = (id) => String(id).replace(/^(villa|apartment)-/, '');
   return {
-    p: [...rows.entries()].map(([id, x]) => `${short(id)}:${val(x.review_status)}|${val(x.review_rejection_reasons)}|${val(x.visibility)}|${val(x.custom_label_3)}`).join(' ; '),
+    p: [...rows.entries()].map(([id, x]) => `${short(id)}:${val(x.review_status)}|${val(x.review_rejection_reasons)}|${val(x.visibility)}|${val(x.custom_label_3)}|${/-offer-/.test(String(x.image_url || '')) ? 'badge' : 'plain'}`).join(' ; '),
     sets: sets.error ? sets.error : (sets.data || []).map((x) => `${x.name} ${x.product_count}`).join(' ; '),
     notes: notes.length ? notes : undefined
   };
@@ -150,6 +150,11 @@ export async function touchProduct(key, change) {
 
 export function recreateRoutes(app, needDb, ah) {
   badgeRoutes(app, needDb, ah);
+  // One calm catalog run now (the same as the automatic one: at most WA_CATALOG_MAX_PER_RUN products, default 3).
+  app.get('/wa-catalog/run', needDb, ah(async (req, res) => {
+    if (String(req.query.confirm || '') !== '1') throw new HttpError(400, 'This runs one calm catalog sync now (at most 3 products). Add confirm=1.');
+    res.status(202).json(await startSync({}));
+  }));
   app.get('/wa-catalog/touch', needDb, ah(async (req, res) => {
     if (String(req.query.confirm || '') !== '1') throw new HttpError(400, 'This changes one field of one product at Meta. Add confirm=1.');
     res.json(await touchProduct(String(req.query.key || ''), String(req.query.change || '')));
