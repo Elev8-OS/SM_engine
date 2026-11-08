@@ -4,11 +4,12 @@ import { HttpError } from '../util.js';
 import { factsFor } from '../facts.js';
 import { runAgent } from './run.js';
 import { TOOLS, systemPrompt, availabilityFrom, priceSummary, isDate, nightsBetween } from './tools.js';
-import { villaView, linkResult, withFees } from './villas.js';
+import { villaView, linkResult, withFees, maxGuests } from './villas.js';
 import { areaGuide } from './area-guide.js';
 import { categoryOf, categoryRow, categoryRows, categoryAvailability, categoryPrices, enrich } from './multiunit.js';
 import { convert } from './currency.js';
 import { budgetCheck } from './negotiation.js';
+import { DEAL_TOOL, dealCodesOn, createDealCode } from './deal-code.js';
 import { livePromos, promoRoutes } from '../promos.js';
 import { readGuest, whyEmpty } from './read.js';
 import { loadSettings, saveSettings, settingsView, mayAutoSend } from './settings.js';
@@ -110,7 +111,7 @@ function checkDates(input) {
   return { ci, co };
 }
 
-/** The tools the model may call. All read-only. */
+/** The tools the model may call. All read-only, except create_deal_code, which only exists while DEAL_CODES is on. */
 export async function execute(name, input) {
   if (name === 'list_villas') {
     const rows = await q('select key, name, area, type, guests, size_m2, bedrooms, url, highlights, open_questions from properties order by key');
@@ -122,7 +123,8 @@ export async function execute(name, input) {
   }
   if (name === 'convert_currency') return convert(input);
   if (name === 'area_guide') return areaGuide(await villa(input.villa), input.topic);
-  if (name === 'check_budget') return budgetCheck(input);
+  if (name === 'check_budget') return budgetCheck({ ...input, dealCodes: dealCodesOn() });
+  if (name === 'create_deal_code') return createDealCode(input, dealDeps());
   if (name === 'build_booking_link') {
     const p = await villa(input.villa);
     checkDates(input);
@@ -149,6 +151,32 @@ export async function execute(name, input) {
     return withFees(priceSummary(rows, ci, co, currency), factsFor(p.key)?.fees);
   }
   throw new Error(`Unknown tool ${name}`);
+}
+
+/** The tools Lea may use: the deal code tool only while the switch DEAL_CODES is on. */
+const agentTools = () => (dealCodesOn() ? [...TOOLS, DEAL_TOOL] : TOOLS);
+
+/** What createDealCode needs from the engine: villa lookup, the same price Lea quotes, the conversion, Elev8 and the database. */
+function dealDeps() {
+  return {
+    villa,
+    isCategory: (key) => Boolean(categoryOf(key)),
+    maxGuests,
+    checkDates,
+    quote: (i) => execute('get_prices', i),
+    convert,
+    // The exact name of the listing in Elev8: the code is limited to this one villa.
+    listingName: async (p, ci) => {
+      const short = p.name.replace(/^The R Villa\s+/i, '');
+      const to = new Date(Date.parse(`${ci}T00:00:00Z`) + 2 * 86400000).toISOString().slice(0, 10);
+      const res = await elev8Tool('get_blocked_dates', { from_date: ci, to_date: to, listing_name: short, listing_tag: '' });
+      const hits = (res?.results || []).filter((r) => `${r.internal_name} ${r.listing_name}`.toLowerCase().includes(short.toLowerCase()));
+      return hits.length === 1 ? hits[0].listing_name : null;
+    },
+    elev8: elev8Tool,
+    q,
+    today
+  };
 }
 
 /** The tools for one channel: the booking links carry the tracking of that channel. */
@@ -241,7 +269,7 @@ export async function processInquiry(id, { auto = false } = {}) {
     const unreadable = channel === 'whatsapp' && NOT_READABLE.test(guestText);
     const result = unreadable
       ? { reply: UNREADABLE_REPLY, needs_human: true, reason: 'Voice message, photo or another message the assistant cannot read', intent: 'other', language: 'en', trace: [] }
-      : await runAgent({ system: promptFor(channel), userText: transcript(history, guestText), tools: TOOLS, callModel, execute: executeFor(channel) });
+      : await runAgent({ system: promptFor(channel), userText: transcript(history, guestText), tools: agentTools(), callModel, execute: executeFor(channel) });
     let needsHuman = result.needs_human || !result.reply;
     let reason = result.reason;
     // A WhatsApp reply outside the 24-hour window would be refused: a template is needed, so a person decides.
@@ -342,6 +370,16 @@ export function agentPrivate(app, needDb, ah) {
     res.json(await areaGuide(await villa(req.query.villa), String(req.query.topic || '')));
   }));
 
+  // Deal code check for a stay and an agreed price. Without create=1 it only shows what would be created and writes nothing.
+  // create=1&confirm=1 creates a real one-time code (also while DEAL_CODES is off, so it can be tried first); add test=1 for a code that is already expired.
+  app.get('/agent/deal-code-test', needDb, ah(async (req, res) => {
+    await ensureSchema();
+    const b = req.query;
+    const input = { villa: b.villa, check_in: b.check_in, check_out: b.check_out, adults: Number(b.adults || 2), children: Number(b.children || 0), agreed_price: Number(b.agreed), basis: b.basis === 'per_night' ? 'per_night' : 'total', currency: b.currency || 'IDR' };
+    const create = b.create === '1' && b.confirm === '1';
+    res.json(await createDealCode(input, dealDeps(), { dryRun: !create, force: true, testOnly: b.test === '1' }));
+  }));
+
   app.get('/agent/debug', needDb, ah(async (_req, res) => {
     await ensureSchema();
     res.json({ webhooks: await q('select id, created_at, note, keys, body from webhook_debug order by id desc limit 5') });
@@ -378,7 +416,7 @@ export function agentPrivate(app, needDb, ah) {
     const message = String(req.body?.message || '').trim();
     if (!message) throw new HttpError(400, 'message is required');
     const channel = req.body?.channel === 'whatsapp' ? 'whatsapp' : 'instagram';
-    const result = await runAgent({ system: promptFor(channel), userText: transcript([], message), tools: TOOLS, callModel, execute: executeFor(channel) });
+    const result = await runAgent({ system: promptFor(channel), userText: transcript([], message), tools: agentTools(), callModel, execute: executeFor(channel) });
     res.json(result);
   }));
 
