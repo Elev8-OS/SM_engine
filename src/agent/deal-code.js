@@ -55,8 +55,11 @@ export function makeCode(bytes = crypto.randomBytes(6)) {
 
 const addDays = (day, n) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
 
-/** Arguments of Elev8's create_promo_code: one use, the listings of the villa (or of every unit of an apartment category), the one stay, valid until the next day at the latest. */
-export function promoArgs({ website, code, percent, listingNames, checkIn, today, testOnly = false }) {
+/**
+ * Arguments of Elev8's create_promo_code: one use, the listing of the villa (or of the apartment category), valid until the next day at the latest.
+ * The stay window runs from check-in to check-out: the booking page checks the whole stay against it, a window of the check-in day alone refuses a stay of several nights.
+ */
+export function promoArgs({ website, code, percent, listingNames, checkIn, checkOut, today, testOnly = false }) {
   // A test code is created already expired: it proves that creating works and can never be redeemed.
   const from = testOnly ? addDays(today, -2) : today;
   const until = testOnly ? addDays(today, -1) : addDays(today, VALID_DAYS) < checkIn ? addDays(today, VALID_DAYS) : checkIn;
@@ -77,7 +80,7 @@ export function promoArgs({ website, code, percent, listingNames, checkIn, today
     booking_from_date: from,
     booking_until_date: until,
     stay_from_date: checkIn,
-    stay_until_date: checkIn
+    stay_until_date: checkOut
   };
 }
 
@@ -135,7 +138,7 @@ export async function createDealCode(input, deps, { dryRun = false, force = fals
     const listingNames = await deps.listingNames(p, ci);
     if (!listingNames?.length) return fail('The villa or its units were not found in Elev8.');
     code = code || makeCode();
-    const args = promoArgs({ website: SITE(env), code, percent: plan.percent, listingNames, checkIn: ci, today: day, testOnly });
+    const args = promoArgs({ website: SITE(env), code, percent: plan.percent, listingNames, checkIn: ci, checkOut: co, today: day, testOnly });
     if (dryRun) return { ok: true, dry_run: true, plan, offered_in_currency: Math.round(conv.converted), currency: cur, agreed_total: Math.round(agreed), nights, create_promo_code_args: args };
 
     if (!reused) {
