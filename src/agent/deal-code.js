@@ -27,7 +27,8 @@ export const DEAL_TOOL = {
       children: { type: 'integer', description: 'Number of children, 0 or more' },
       agreed_price: { type: 'number', description: 'The price the guest accepted, in the currency of currency' },
       basis: { type: 'string', enum: ['total', 'per_night'], description: 'Whether agreed_price is for the whole stay or per night' },
-      currency: { type: 'string', description: '3-letter code of agreed_price and of the link, for example IDR' }
+      currency: { type: 'string', description: '3-letter code of agreed_price and of the link, for example IDR' },
+      guest_name: { type: 'string', description: "The guest's first name (from the guest name line or the chat). It goes into the code, for example LEA-ANNA. Leave it out when you do not know a real name." }
     },
     required: ['villa', 'check_in', 'check_out', 'adults', 'children', 'agreed_price', 'basis', 'currency'],
     additionalProperties: false
@@ -47,27 +48,28 @@ export function planDeal({ offered, agreed } = {}) {
   return { ok: true, percent, clamped, expected_price: Math.round(o * (1 - percent / 100)), offered: Math.round(o) };
 }
 
-/**
- * Total of the PriceLabs `price` field over the nights of a stay, null when a night has no price.
- * This is what the booking page adds up: on 8 Nov 2026 a 7 night Mezzanine stay showed CHF 674, exactly the sum of `price`,
- * while get_prices (what Lea quotes) sums `user_price`, the price pushed to the booking channels, here CHF 688.
- * A percentage code is worked out against the price of the booking page, so that the page shows the agreed price.
- */
-export function sitePriceTotal(rows, checkIn, checkOut) {
-  const byDate = new Map((rows || []).map((r) => [r.date, r]));
-  const nights = nightsBetween(checkIn, checkOut);
-  const per = nights.map((d) => {
-    const r = byDate.get(d);
-    return r && !r.unbookable && r.price > 0 ? r.price : null;
-  });
-  if (!nights.length || per.some((p) => p === null)) return null;
-  return per.reduce((a, b) => a + b, 0);
-}
-
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 /** LEA-XXXXXX, no look-alike characters. */
 export function makeCode(bytes = crypto.randomBytes(6)) {
   return `LEA-${Array.from(bytes, (b) => ALPHABET[b % ALPHABET.length]).join('')}`;
+}
+
+/** The part of a guest name that goes into the code: the first word of letters, upper case, without accents, at most 12 characters. Empty when there is none (a phone number, no name). */
+export function nameToken(name) {
+  const plain = String(name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const m = /[A-Za-z]{2,}/.exec(plain);
+  return m ? m[0].toUpperCase().slice(0, 12) : '';
+}
+
+/** LEA-<NAME>; when that code exists already LEA-<NAME>2, LEA-<NAME>3 ...; LEA-XXXXXX when the guest has no usable name. taken(code) says whether a code exists. */
+export async function codeFor(guestName, taken = async () => false, random = makeCode) {
+  const token = nameToken(guestName);
+  if (!token) return random();
+  for (let i = 1; i <= 9; i++) {
+    const code = `LEA-${token}${i === 1 ? '' : i}`;
+    if (!(await taken(code))) return code;
+  }
+  return random();
 }
 
 const addDays = (day, n) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
@@ -106,7 +108,8 @@ const keyOf = (v) => crypto.createHash('sha1').update(v).digest('hex').slice(0, 
 /**
  * Orchestrates one deal code. deps are injected so the logic is testable without network:
  * villa(key), unsupported(key), maxGuests(p), checkDates(input), quote(input) -> price summary, convert({amount,from,to}),
- * listingNames(p, checkIn) -> the Elev8 listing name the code is limited to (a villa), or null for no restriction (apartment categories), elev8(name, args), q(sql, params), today(), env.
+ * listingNames(p, checkIn) -> the Elev8 listing name the code is limited to (a villa), or null for no restriction (apartment categories),
+ * codeTaken(code) -> whether a code of ours exists already, elev8(name, args), q(sql, params), today(), env.
  * Never throws: a problem comes back as a note for the model. force skips the DEAL_CODES switch (manual test route).
  */
 export async function createDealCode(input, deps, { dryRun = false, force = false, testOnly = false } = {}) {
@@ -128,12 +131,10 @@ export async function createDealCode(input, deps, { dryRun = false, force = fals
     if (!(agreedIn > 0)) return fail('The agreed price is missing.');
     const agreed = input.basis === 'per_night' ? agreedIn * nights : agreedIn;
 
-    // What the booking page asks for this stay, in the currency of the agreement.
+    // What the booking page asks for this stay: the same price Lea quoted (the PriceLabs price, stay total, with fees where a fact sheet has them), in the currency of the agreement.
     const price = await deps.quote({ villa: p.key, check_in: ci, check_out: co });
     if (!price?.ok) return fail('No price is available for these dates.');
-    // The booking page price (site_total) when known, plus the fees Lea quotes on top; else the quoted total.
-    const fees = Number.isFinite(price.total_incl_fees) ? price.total_incl_fees - price.total : 0;
-    const offeredCHF = Number.isFinite(price.site_total) ? price.site_total + fees : price.total_incl_fees ?? price.total;
+    const offeredCHF = price.total_incl_fees ?? price.total;
     const conv = price.currency === cur ? { ok: true, converted: offeredCHF } : await deps.convert({ amount: offeredCHF, from: price.currency, to: cur });
     if (!conv.ok) return fail('The price could not be converted.');
     const plan = planDeal({ offered: conv.converted, agreed });
@@ -157,16 +158,31 @@ export async function createDealCode(input, deps, { dryRun = false, force = fals
     const listingNames = await deps.listingNames(p, ci);
     // null means every listing (apartment categories, see routes.js); an empty list means the villa was not found.
     if (listingNames !== null && !listingNames?.length) return fail('The villa was not found in Elev8.');
-    code = code || makeCode();
-    const args = promoArgs({ website: SITE(env), code, percent: plan.percent, listingNames, checkIn: ci, checkOut: co, today: day, testOnly });
+    // The code carries the guest's name (LEA-ANNA). One that exists already, in our records or in Elev8, gets a number.
+    const tried = new Set();
+    const taken = async (c) => tried.has(c) || deps.codeTaken(c);
+    code = code || (await codeFor(input.guest_name, taken));
+    const argsFor = (c) => promoArgs({ website: SITE(env), code: c, percent: plan.percent, listingNames, checkIn: ci, checkOut: co, today: day, testOnly });
+    let args = argsFor(code);
     if (dryRun) return { ok: true, dry_run: true, plan, offered_in_currency: Math.round(conv.converted), currency: cur, agreed_total: Math.round(agreed), nights, create_promo_code_args: args };
 
     if (!reused) {
-      try {
-        await deps.elev8('create_promo_code', args);
-      } catch (e) {
-        return fail(`The code could not be created (${String(e.message || e).slice(0, 120)}).`);
+      let created = false;
+      let lastError = '';
+      for (let attempt = 0; attempt < 3 && !created; attempt++) {
+        try {
+          await deps.elev8('create_promo_code', args);
+          created = true;
+        } catch (e) {
+          lastError = String(e.message || e);
+          // only a code that exists already is tried again, with the next name
+          if (!/exist|unique|already|duplicate|taken/i.test(lastError)) break;
+          tried.add(code);
+          code = await codeFor(input.guest_name, taken);
+          args = argsFor(code);
+        }
       }
+      if (!created) return fail(`The code could not be created (${lastError.slice(0, 120)}).`);
       await deps.q("insert into agent_settings (key, value, updated_at) values ($1, $2, now()) on conflict (key) do update set value = excluded.value, updated_at = now()", [dedupe, JSON.stringify({ code, villa: p.key, check_in: ci, check_out: co, percent: plan.percent, agreed: Math.round(agreed), currency: cur, test: testOnly })]);
     }
     if (testOnly) return { ok: true, test_only: true, promo_code: code, percent: plan.percent, note: 'Test code created already expired. It cannot be redeemed.' };
