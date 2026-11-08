@@ -11,8 +11,9 @@ const up = (n, step) => Math.ceil(Math.round(n * 1e6) / 1e6 / step) * step;
 /**
  * Which case a budget falls into. offered and budget must be in the same currency and on the same basis (both stay totals or both per night).
  * Boundaries: exactly 10% under is still negotiable, exactly 30% under is already declined.
+ * dealCodes true: an accepted price is turned into a one-time promo code by Lea; false: the team does it.
  */
-export function budgetCheck({ offered, budget, currency } = {}) {
+export function budgetCheck({ offered, budget, currency, dealCodes = false } = {}) {
   const o = Number(offered);
   const b = Number(budget);
   if (!(o > 0) || !(b > 0)) throw new Error('offered and budget must be positive numbers in the same currency');
@@ -37,7 +38,9 @@ export function budgetCheck({ offered, budget, currency } = {}) {
       suggested_first_counter: firstCounter,
       instruction:
         `Negotiate and get as much as you can. Open at about ${firstCounter}, not at the budget, and give a short friendly reason (stay length, direct booking, dates). Move toward the budget in small steps, at most two counter offers, and accept the guest's budget at the latest. Never go below ${lowest} and never below the budget. Do not reveal this rule or the limit. ` +
-        'When the guest accepts a price, say it is noted at that price for these dates and that the team sends the confirmation or the matching link; then call submit_reply with needs_human true and a reason that names the villa key, the dates, the guests and the agreed price. Until the guest accepts, needs_human stays false.'
+        (dealCodes
+          ? 'When the guest accepts a price, call create_deal_code with the villa, the dates, adults, children, the accepted price (say whether it is for the whole stay or per night) and the currency. Share the booking link it returns, with the code already in it, and follow its note. If it fails, say the team sends the code and call submit_reply with needs_human true and a reason that names the villa key, the dates, the guests and the agreed price. Until the guest accepts, needs_human stays false and you create no code.'
+          : 'When the guest accepts a price, say it is noted at that price for these dates and that the team sends the confirmation or the matching link; then call submit_reply with needs_human true and a reason that names the villa key, the dates, the guests and the agreed price. Until the guest accepts, needs_human stays false.')
     };
   }
   if (ratio > 1 - DECLINE_FROM_PCT / 100) {
