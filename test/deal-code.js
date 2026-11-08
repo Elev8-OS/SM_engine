@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { planDeal, makeCode, promoArgs, createDealCode, dealCodesOn, DEAL_TOOL } from '../src/agent/deal-code.js';
+import { planDeal, makeCode, promoArgs, createDealCode, dealCodesOn, sitePriceTotal, DEAL_TOOL } from '../src/agent/deal-code.js';
 import { budgetCheck } from '../src/agent/negotiation.js';
 
 let n = 0;
@@ -84,6 +84,36 @@ await t('a stay of several nights lies inside the stay window of its code', asyn
   assert.ok(a.stay_from_date <= '2027-01-18' && a.stay_until_date >= '2027-01-24');
   assert.equal(a.stay_from_date, '2027-01-18');
   assert.equal(a.stay_until_date, '2027-01-24');
+});
+// PriceLabs rows of the Mezzanine category, 18 to 24 Jan 2027 (nights of a 7 night stay), as read on 8 Nov 2026
+const MEZZ = [[95, 97], [93, 95], [95, 97], [96, 98], [97, 100], [100, 102], [98, 99]].map(([price, user_price], i) => ({ date: `2027-01-${18 + i}`, price, user_price, unbookable: 0 }));
+await t('booking page price: the sum of the PriceLabs price, not of the price pushed to the channels', () => {
+  assert.equal(sitePriceTotal(MEZZ, '2027-01-18', '2027-01-25'), 674);
+  assert.equal(MEZZ.reduce((a, r) => a + r.user_price, 0), 688); // what Lea quoted
+  assert.equal(sitePriceTotal(MEZZ, '2027-01-18', '2027-01-26'), null, 'a night without a price');
+  assert.equal(sitePriceTotal([{ ...MEZZ[0], unbookable: 1 }, ...MEZZ.slice(1)], '2027-01-18', '2027-01-25'), null);
+  assert.equal(sitePriceTotal(undefined, '2027-01-18', '2027-01-25'), null);
+});
+await t('the discount is worked out against the booking page price: the page shows the agreed price', async () => {
+  reset();
+  // agreed CHF 645 for the 7 nights; the page shows 674, Lea had quoted 688
+  const quote = async () => ({ ok: true, currency: 'CHF', total: 688, total_incl_fees: 688, site_total: 674 });
+  const r = await createDealCode({ ...input, villa: 'apt-mezzanine', check_in: '2027-01-18', check_out: '2027-01-25', adults: 3, agreed_price: 645, currency: 'CHF' }, mk({ quote, today: () => '2026-11-08' }));
+  assert.ok(r.ok, r.note);
+  const pct = calls.elev8[0].args.percentage_discount;
+  assert.equal(pct, 4.31);
+  // what the page then shows
+  assert.ok(Math.abs(674 * (1 - pct / 100) - 645) < 0.1);
+  assert.ok(674 * (1 - pct / 100) <= 645, 'never more than agreed');
+  assert.equal(r.expected_price, 645);
+  // worked out against the quoted 688 it would have been 6.25%, and the page would have shown 631.88
+  assert.equal(planDeal({ offered: 688, agreed: 645 }).percent, 6.25);
+});
+await t('without a booking page price the quoted total is used as before', async () => {
+  reset();
+  const r = await createDealCode(input, mk());
+  assert.ok(r.ok);
+  assert.equal(calls.elev8[0].args.percentage_discount, 7.78);
 });
 await t('off by default: no code, the team is told', async () => {
   reset();

@@ -9,7 +9,7 @@ import { areaGuide } from './area-guide.js';
 import { categoryOf, categoryRow, categoryRows, categoryAvailability, categoryPrices, enrich } from './multiunit.js';
 import { convert } from './currency.js';
 import { budgetCheck } from './negotiation.js';
-import { DEAL_TOOL, dealCodesOn, createDealCode } from './deal-code.js';
+import { DEAL_TOOL, dealCodesOn, createDealCode, sitePriceTotal } from './deal-code.js';
 import { livePromos, promoRoutes } from '../promos.js';
 import { readGuest, whyEmpty } from './read.js';
 import { loadSettings, saveSettings, settingsView, mayAutoSend } from './settings.js';
@@ -164,7 +164,25 @@ function dealDeps() {
     unsupported: (key) => categoryOf(key)?.kind === 'room',
     maxGuests,
     checkDates,
-    quote: (i) => execute('get_prices', i),
+    // The price Lea quotes, plus site_total: the sum of the PriceLabs price the booking page shows (see sitePriceTotal). The lowest list of a category counts.
+    quote: async (i) => {
+      const price = await execute('get_prices', i);
+      if (!price?.ok) return price;
+      try {
+        const p = await villa(i.villa);
+        const cat = categoryOf(p.key);
+        const ids = (cat ? cat.priceIds || cat.priceKeys.map((k) => priceIds()[k]) : [priceIds()[p.key]]).filter(Boolean);
+        const totals = [];
+        for (const id of ids) {
+          const { rows } = await pricelabsRows(id, i.check_in, i.check_out);
+          const t = sitePriceTotal(rows, i.check_in, i.check_out);
+          if (t !== null) totals.push(t);
+        }
+        return totals.length ? { ...price, site_total: Math.min(...totals) } : price;
+      } catch {
+        return price;
+      }
+    },
     convert,
     // The exact name in Elev8 the code is limited to. A villa is one listing. The units of an apartment category are separate rows in Elev8 that share one listing id,
     // and a code tied to one of those rows is refused on the booking page of another (seen on 8 Nov 2026), so categories get no restriction (null):
