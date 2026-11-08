@@ -22,14 +22,18 @@ export function availabilityFrom(listing, checkIn, checkOut) {
   return { available: true, nights: nights.length };
 }
 
-/** Sum the nightly prices of a stay from PriceLabs rows. Uses the price pushed to channels, else the recommendation. */
+/**
+ * Sum the nightly prices of a stay from PriceLabs rows. Uses the PriceLabs price, which is what the booking page adds up
+ * (checked on 8 Nov 2026: 7 Mezzanine nights CHF 674 on the page, the sum of price; user_price, the price pushed to the booking channels, gave 688).
+ * Where a night has no price, the price pushed to the channels is the fallback.
+ */
 export function priceSummary(rows, checkIn, checkOut, currency) {
   const byDate = new Map((rows || []).map((r) => [r.date, r]));
   const nights = nightsBetween(checkIn, checkOut);
   const per = nights.map((d) => {
     const r = byDate.get(d);
     if (!r || r.unbookable) return null;
-    const p = r.user_price > 0 ? r.user_price : r.price;
+    const p = r.price > 0 ? r.price : r.user_price;
     return p > 0 ? p : null;
   });
   if (!nights.length || per.some((p) => p === null)) return { ok: false, note: 'No price available for some of these nights. The booking page shows the price for these dates.' };
