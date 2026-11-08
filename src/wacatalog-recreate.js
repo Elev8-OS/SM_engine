@@ -151,9 +151,10 @@ export async function touchProduct(key, change) {
 export function recreateRoutes(app, needDb, ah) {
   badgeRoutes(app, needDb, ah);
   // One calm catalog run now (the same as the automatic one: at most WA_CATALOG_MAX_PER_RUN products, default 3).
+  // Main photos change only in the night window of Bali time; images=1 changes them now.
   app.get('/wa-catalog/run', needDb, ah(async (req, res) => {
-    if (String(req.query.confirm || '') !== '1') throw new HttpError(400, 'This runs one calm catalog sync now (at most 3 products). Add confirm=1.');
-    res.status(202).json(await startSync({}));
+    if (String(req.query.confirm || '') !== '1') throw new HttpError(400, 'This runs one calm catalog sync now (at most 3 products). Add confirm=1. Main photos are changed only at night; add images=1 to change them now.');
+    res.status(202).json(await startSync({ imagesNow: String(req.query.images || '') === '1' }));
   }));
   app.get('/wa-catalog/touch', needDb, ah(async (req, res) => {
     if (String(req.query.confirm || '') !== '1') throw new HttpError(400, 'This changes one field of one product at Meta. Add confirm=1.');
