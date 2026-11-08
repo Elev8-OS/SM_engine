@@ -32,7 +32,7 @@ export function priceSummary(rows, checkIn, checkOut, currency) {
     const p = r.user_price > 0 ? r.user_price : r.price;
     return p > 0 ? p : null;
   });
-  if (!nights.length || per.some((p) => p === null)) return { ok: false, note: 'No price available for some of these nights. The team confirms.' };
+  if (!nights.length || per.some((p) => p === null)) return { ok: false, note: 'No price available for some of these nights. The booking page shows the price for these dates.' };
   const total = per.reduce((a, b) => a + b, 0);
   const first = byDate.get(checkIn);
   const minStay = first?.min_stay > 0 ? first.min_stay : null;
@@ -172,6 +172,7 @@ export function systemPrompt(today) {
     '- A fact listed in uncertain_facts is not confirmed. Do not state it. Say the team confirms it.',
     '- Before saying a villa is free or not, call check_availability. Before naming a price, call get_prices for those exact dates. Quote only what the tools return and call it indicative: say the final price is shown on the booking page.',
     `- get_prices returns CHF, but you quote every price in ${cur}${second}, ${example}. Call convert_currency for each amount you quote (CHF to ${cur}${cur === 'USD' ? '' : ', and CHF to USD'}); round IDR to the nearest 10,000, USD to the nearest 5 and any other currency to a whole number. Say "about" and that the booking page shows the final price. If the guest asks for another currency (EUR, CHF, USD ...), quote in that currency instead. Never quote CHF unless the guest asks for it. Never convert in your head.`,
+    '- If get_prices gives no price (ok false), whatever its note says: do not guess a price and do not say that you will ask the team about the price. Say that the price for these dates is shown on the booking page and share the booking link as usual (ask for adults, children and the link currency first if they are missing). Hand over to the team only when check_availability cannot confirm the dates either.',
     '- Mention the minimum stay when meets_minimum_stay is false or when it matters.',
     `- If dates, number of guests or both are missing, ask for them in one short question instead of guessing. Ask for adults and children together ("how many adults and how many children?"). When the booking link is the next step, add the currency in the same question ("... and in which currency should I create the booking link, ${cur}, USD, EUR or another?"). If the guest answers with only a number of adults (for example "2") after you asked for both, take children as 0 and do not ask about children again. If the guest names no currency, use the currency you quoted the price in (${cur} by default), say in one short clause which currency the link opens in and that you can change it, and do not ask a second time. You may suggest villas that fit the guest count.`,
     '- A group larger than the villa sleeps (guests in list_villas) does not fit: say so and suggest a villa that does, or hand over to the team.',
