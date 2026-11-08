@@ -6,8 +6,8 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "test": "node test/unit.js && node test/read.js && node test/settings.js && node test/currency.js && node test/promos.js && node test/competitors.js && node test/classify.js && node test/compare.js && node test/drafting.js && node test/multiunit.js && node test/area-guide.js && node test/negotiation.js && node test/deal-code.js && node test/smoke.js",
-    "test:unit": "node test/unit.js && node test/read.js && node test/settings.js && node test/currency.js && node test/promos.js && node test/competitors.js && node test/classify.js && node test/compare.js && node test/drafting.js && node test/multiunit.js && node test/area-guide.js && node test/negotiation.js && node test/deal-code.js"
+    "test": "node test/unit.js && node test/read.js && node test/settings.js && node test/currency.js && node test/promos.js && node test/competitors.js && node test/classify.js && node test/compare.js && node test/drafting.js && node test/multiunit.js && node test/area-guide.js && node test/negotiation.js && node test/deal-code.js && node test/deal-listing.js && node test/smoke.js",
+    "test:unit": "node test/unit.js && node test/read.js && node test/settings.js && node test/currency.js && node test/promos.js && node test/competitors.js && node test/classify.js && node test/compare.js && node test/drafting.js && node test/multiunit.js && node test/area-guide.js && node test/negotiation.js && node test/deal-code.js && node test/deal-listing.js"
   },
   "engines": {
     "node": ">=20"

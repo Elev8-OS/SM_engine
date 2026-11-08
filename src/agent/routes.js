@@ -10,6 +10,7 @@ import { categoryOf, categoryRow, categoryRows, categoryAvailability, categoryPr
 import { convert } from './currency.js';
 import { budgetCheck } from './negotiation.js';
 import { DEAL_TOOL, dealCodesOn, createDealCode } from './deal-code.js';
+import { categoryListingNames } from './deal-listing.js';
 import { livePromos, promoRoutes } from '../promos.js';
 import { readGuest, whyEmpty } from './read.js';
 import { loadSettings, saveSettings, settingsView, mayAutoSend } from './settings.js';
@@ -166,13 +167,13 @@ function dealDeps() {
     checkDates,
     quote: (i) => execute('get_prices', i),
     convert,
-    // The exact names in Elev8 the code is limited to: the one villa, or every unit of an apartment category (their internal names are unique).
+    // The exact name in Elev8 the code is limited to: the villa, or the one listing of an apartment category (all its units share it, see deal-listing.js).
     listingNames: async (p, ci) => {
       const to = new Date(Date.parse(`${ci}T00:00:00Z`) + 2 * 86400000).toISOString().slice(0, 10);
       const cat = categoryOf(p.key);
       if (cat) {
         const res = await elev8Tool('get_blocked_dates', { from_date: ci, to_date: to, listing_name: cat.query, listing_tag: '' });
-        return [...new Set((res?.results || []).filter(cat.pick).map((r) => r.internal_name).filter(Boolean))];
+        return categoryListingNames(res?.results, cat.pick);
       }
       const short = p.name.replace(/^The R Villa\s+/i, '');
       const res = await elev8Tool('get_blocked_dates', { from_date: ci, to_date: to, listing_name: short, listing_tag: '' });
