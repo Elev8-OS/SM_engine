@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { planDeal, makeCode, promoArgs, createDealCode, dealCodesOn, sitePriceTotal, DEAL_TOOL } from '../src/agent/deal-code.js';
+import { planDeal, makeCode, nameToken, codeFor, promoArgs, createDealCode, dealCodesOn, DEAL_TOOL } from '../src/agent/deal-code.js';
+import { priceSummary } from '../src/agent/tools.js';
 import { budgetCheck } from '../src/agent/negotiation.js';
 
 let n = 0;
@@ -16,6 +17,7 @@ const mk = (over = {}) => ({
   quote: async () => ({ ok: true, currency: 'CHF', total: 500, total_incl_fees: 500 }),
   convert: async ({ amount, to }) => ({ ok: true, converted: to === 'IDR' ? amount * 18000 : amount * 1.1 }),
   listingNames: async (p) => (p.key.startsWith('apt-') ? null : ['The R Villa Samalas | 4BR Retreat in Pererenan']),
+  codeTaken: async () => false,
   elev8: async (name, args) => { calls.elev8.push({ name, args }); return {}; },
   q: async (sql, params) => {
     if (/count\(\*\)/.test(sql)) return [{ n: over.countToday ?? 0 }];
@@ -87,33 +89,91 @@ await t('a stay of several nights lies inside the stay window of its code', asyn
 });
 // PriceLabs rows of the Mezzanine category, 18 to 24 Jan 2027 (nights of a 7 night stay), as read on 8 Nov 2026
 const MEZZ = [[95, 97], [93, 95], [95, 97], [96, 98], [97, 100], [100, 102], [98, 99]].map(([price, user_price], i) => ({ date: `2027-01-${18 + i}`, price, user_price, unbookable: 0 }));
-await t('booking page price: the sum of the PriceLabs price, not of the price pushed to the channels', () => {
-  assert.equal(sitePriceTotal(MEZZ, '2027-01-18', '2027-01-25'), 674);
-  assert.equal(MEZZ.reduce((a, r) => a + r.user_price, 0), 688); // what Lea quoted
-  assert.equal(sitePriceTotal(MEZZ, '2027-01-18', '2027-01-26'), null, 'a night without a price');
-  assert.equal(sitePriceTotal([{ ...MEZZ[0], unbookable: 1 }, ...MEZZ.slice(1)], '2027-01-18', '2027-01-25'), null);
-  assert.equal(sitePriceTotal(undefined, '2027-01-18', '2027-01-25'), null);
+await t('Lea quotes the booking page price: the PriceLabs price, not the price pushed to the channels', () => {
+  const r = priceSummary(MEZZ, '2027-01-18', '2027-01-25', 'CHF');
+  assert.ok(r.ok);
+  assert.equal(r.total, 674);
+  assert.equal(r.nights, 7);
+  assert.equal(MEZZ.reduce((a, x) => a + x.user_price, 0), 688); // what the channels get
+  // a night without a price falls back to the price pushed to the channels
+  const gap = MEZZ.map((x, i) => (i === 2 ? { ...x, price: 0 } : x));
+  assert.equal(priceSummary(gap, '2027-01-18', '2027-01-25', 'CHF').total, 674 - 95 + 97);
+  // a night without any price: no total
+  assert.equal(priceSummary(MEZZ, '2027-01-18', '2027-01-26', 'CHF').ok, false);
 });
-await t('the discount is worked out against the booking page price: the page shows the agreed price', async () => {
+await t('the discount is worked out against the price Lea quoted, which is the booking page price', async () => {
   reset();
-  // agreed CHF 645 for the 7 nights; the page shows 674, Lea had quoted 688
-  const quote = async () => ({ ok: true, currency: 'CHF', total: 688, total_incl_fees: 688, site_total: 674 });
+  // agreed CHF 645 for the 7 nights, the page and Lea's quote say 674
+  const quote = async () => ({ ok: true, currency: 'CHF', total: 674, total_incl_fees: 674 });
   const r = await createDealCode({ ...input, villa: 'apt-mezzanine', check_in: '2027-01-18', check_out: '2027-01-25', adults: 3, agreed_price: 645, currency: 'CHF' }, mk({ quote, today: () => '2026-11-08' }));
   assert.ok(r.ok, r.note);
   const pct = calls.elev8[0].args.percentage_discount;
   assert.equal(pct, 4.31);
-  // what the page then shows
   assert.ok(Math.abs(674 * (1 - pct / 100) - 645) < 0.1);
   assert.ok(674 * (1 - pct / 100) <= 645, 'never more than agreed');
   assert.equal(r.expected_price, 645);
-  // worked out against the quoted 688 it would have been 6.25%, and the page would have shown 631.88
-  assert.equal(planDeal({ offered: 688, agreed: 645 }).percent, 6.25);
 });
-await t('without a booking page price the quoted total is used as before', async () => {
+await t('the name of the guest goes into the code', () => {
+  assert.equal(nameToken('Anna Müller'), 'ANNA');
+  assert.equal(nameToken('Amplitude 62 811 3850 711'), 'AMPLITUDE');
+  assert.equal(nameToken('José'), 'JOSE');
+  assert.equal(nameToken('  maximilian-alexander '), 'MAXIMILIAN-'.slice(0, 10));
+  assert.equal(nameToken('Bartholomew-Christopher').length <= 12, true);
+  assert.equal(nameToken('62 811 3850 711'), '');
+  assert.equal(nameToken(''), '');
+  assert.equal(nameToken(undefined), '');
+  assert.equal(nameToken('X'), '', 'one letter is no name');
+});
+await t('LEA-NAME, a number when it exists, a random code without a name', async () => {
+  assert.equal(await codeFor('Anna'), 'LEA-ANNA');
+  const taken = async (c) => ['LEA-ANNA', 'LEA-ANNA2'].includes(c);
+  assert.equal(await codeFor('Anna', taken), 'LEA-ANNA3');
+  assert.match(await codeFor('62 811', taken), /^LEA-[A-HJ-NP-Z2-9]{6}$/);
+  assert.match(await codeFor(undefined), /^LEA-[A-HJ-NP-Z2-9]{6}$/);
+  // fits what Elev8 and the booking link allow
+  assert.match(await codeFor('Bartholomew-Christopher'), /^[A-Z0-9][A-Z0-9_-]{2,23}$/);
+  assert.ok((await codeFor('Bartholomew')).length <= 25);
+});
+await t('the created code is LEA-NAME and the link carries it', async () => {
+  reset();
+  const r = await createDealCode({ ...input, guest_name: 'Anna Müller' }, mk());
+  assert.ok(r.ok, r.note);
+  assert.equal(r.promo_code, 'LEA-ANNA');
+  assert.equal(calls.elev8[0].args.promo_code, 'LEA-ANNA');
+  assert.equal(calls.elev8[0].args.name, 'Lea LEA-ANNA');
+  assert.equal(new URL(r.booking_link).searchParams.get('promo_code'), 'LEA-ANNA');
+});
+await t('a name that is taken in our records gets a number', async () => {
+  reset();
+  const r = await createDealCode({ ...input, guest_name: 'Anna' }, mk({ codeTaken: async (c) => c === 'LEA-ANNA' }));
+  assert.equal(r.promo_code, 'LEA-ANNA2');
+});
+await t('a name that is taken in Elev8 is tried again with a number, other errors are not', async () => {
+  reset();
+  let first = true;
+  const dup = async (name, args) => {
+    if (first) { first = false; throw new Error('Elev8: promo code already exists'); }
+    calls.elev8.push({ name, args });
+  };
+  const r = await createDealCode({ ...input, guest_name: 'Anna' }, mk({ elev8: dup }));
+  assert.ok(r.ok, r.note);
+  assert.equal(r.promo_code, 'LEA-ANNA2');
+  assert.equal(calls.elev8.length, 1);
+  reset();
+  let tries = 0;
+  const denied = async () => { tries++; throw new Error('Elev8: Unauthorized'); };
+  const f = await createDealCode({ ...input, guest_name: 'Anna' }, mk({ elev8: denied }));
+  assert.equal(f.ok, false);
+  assert.equal(tries, 1);
+});
+await t('no name given: a random code as before', async () => {
   reset();
   const r = await createDealCode(input, mk());
-  assert.ok(r.ok);
-  assert.equal(calls.elev8[0].args.percentage_discount, 7.78);
+  assert.match(r.promo_code, /^LEA-[A-HJ-NP-Z2-9]{6}$/);
+});
+await t('the tool takes the guest name, but does not require it', () => {
+  assert.ok(DEAL_TOOL.input_schema.properties.guest_name);
+  assert.ok(!DEAL_TOOL.input_schema.required.includes('guest_name'));
 });
 await t('off by default: no code, the team is told', async () => {
   reset();
