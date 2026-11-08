@@ -79,11 +79,34 @@ export async function sendProductMessage({ to, keys, text }) {
  * the chat (is_catalog_visible) and which catalogs are linked to the WhatsApp account. With fix (and confirm) it links the catalog again
  * and switches it visible, the same step as the first set-up. One short answer, because the probe keeps only the first part.
  */
-export async function commerceState({ fix = false } = {}) {
+export async function commerceState({ fix = false, toggle = false } = {}) {
   const s = waCatalogSettings();
   const catalog = await catalogId();
   const out = { catalog, phone: null, commerce: null, linked: null, errors: [] };
   const cut = (e) => String(e?.message || e).slice(0, 120);
+  // toggle: hides the catalog in the chat and shows it again, so Meta rebuilds what the chat shows. The "on" step is tried up to three
+  // times, so the catalog is never left hidden; the state below is read after it.
+  if (toggle) {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const t = { off: null, on: null };
+    try {
+      await graph('POST', `${s.phoneId}/whatsapp_commerce_settings`, { is_catalog_visible: false, is_cart_enabled: false });
+      t.off = true;
+    } catch (e) {
+      t.off = cut(e);
+    }
+    await sleep(8000);
+    for (let i = 0; i < 3 && t.on !== true; i++) {
+      try {
+        await graph('POST', `${s.phoneId}/whatsapp_commerce_settings`, { is_catalog_visible: true, is_cart_enabled: false });
+        t.on = true;
+      } catch (e) {
+        t.on = cut(e);
+        await sleep(3000);
+      }
+    }
+    out.toggle = t;
+  }
   try {
     const p = await graph('GET', s.phoneId, { fields: 'display_phone_number,verified_name,name_status,quality_rating,platform_type,code_verification_status' });
     out.phone = `${p.display_phone_number} | ${p.verified_name} | name ${p.name_status} | ${p.platform_type} | ${p.code_verification_status} | quality ${p.quality_rating}`;
@@ -180,7 +203,9 @@ export function sendRoutes(app, needDb, ah) {
   app.get('/wa-catalog/commerce', needDb, ah(async (req, res) => {
     const fix = String(req.query.fix || '') === '1';
     if (fix && String(req.query.confirm || '') !== '1') throw new HttpError(400, 'fix links the catalog to the WhatsApp account again and switches it visible. Add confirm=1.');
-    res.json(await commerceState({ fix }));
+    const toggle = String(req.query.toggle || '') === '1';
+    if (toggle && String(req.query.confirm || '') !== '1') throw new HttpError(400, 'toggle hides the catalog in the chat for a few seconds and shows it again. Add confirm=1.');
+    res.json(await commerceState({ fix, toggle }));
   }));
   app.get('/wa-catalog/quote-test', needDb, ah(async (req, res) => {
     res.json(await quoteTest({ villa: String(req.query.villa || 'Bratan'), checkIn: String(req.query.in || '2026-12-05'), checkOut: String(req.query.out || '2026-12-09'), adults: Number(req.query.adults) || 3, children: Number(req.query.children) || 0 }));
