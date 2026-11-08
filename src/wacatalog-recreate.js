@@ -3,6 +3,7 @@ import { HttpError } from './util.js';
 import { graph } from './meta.js';
 import { catalogId, startSync, waCatalogSettings } from './wacatalog.js';
 import { badgeRoutes } from './wacatalog-badge.js';
+import { sendRoutes } from './wacatalog-send.js';
 
 // Recreate a product of the WhatsApp catalog: the product is deleted at Meta and sent again as a NEW product with all its photos.
 // Why: WhatsApp keeps showing one photo for a product it has read once, although the Commerce Manager holds all of them. A product
@@ -150,6 +151,7 @@ export async function touchProduct(key, change) {
 
 export function recreateRoutes(app, needDb, ah) {
   badgeRoutes(app, needDb, ah);
+  sendRoutes(app, needDb, ah);
   // One calm catalog run now (the same as the automatic one: at most WA_CATALOG_MAX_PER_RUN products, default 3).
   // Main photos change only in the night window of Bali time; images=1 changes them now.
   app.get('/wa-catalog/run', needDb, ah(async (req, res) => {
