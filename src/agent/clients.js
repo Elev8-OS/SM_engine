@@ -2,12 +2,21 @@ import { HttpError } from '../util.js';
 
 const GHL = 'https://services.leadconnectorhq.com';
 
+// PriceLabs listings of villas that are not in PRICELABS_LISTINGS (yet). The variable wins when it names the villa. Without these two
+// the assistant had no price for Bratan and Tambora and sent the guest to the team.
+const PRICE_FALLBACK = {
+  bratan: '60e9b31b-1313-45b9-9c61-13f9f5cc8cf4___7f7206ac-8595-40c4-8fca-c1394d350745',
+  tambora: 'a34cc21d-f853-488e-ba11-a42902a6b0aa___254a15a0-f81a-45a1-8bed-60b445933f81'
+};
+
 export function priceIds() {
+  let env = {};
   try {
-    return JSON.parse(process.env.PRICELABS_LISTINGS || '{}');
+    env = JSON.parse(process.env.PRICELABS_LISTINGS || '{}') || {};
   } catch {
-    return {};
+    env = {};
   }
+  return { ...PRICE_FALLBACK, ...env };
 }
 
 export const agentConfig = () => ({
