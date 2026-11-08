@@ -125,7 +125,11 @@ await t('tool definitions and prompt', () => {
   // Guests are quoted in IDR with about USD (the catalog), and the booking link carries the currency that was quoted.
   assert.match(prompt, /quote every price in IDR with the approximate USD amount/);
   assert.match(prompt, /Never quote CHF unless the guest asks for it/);
-  assert.match(prompt, /Always pass currency \(3-letter code\): IDR/);
+  assert.match(prompt, /without a choice use the currency you quoted in \(IDR by default\)/);
+  // The link currency is asked in the same question as adults and children, and only adults means no children.
+  assert.match(prompt, /in which currency should I create the booking link/);
+  assert.match(prompt, /take children as 0 and do not ask about children again/);
+  assert.match(prompt, /do not ask a second time/);
   // The title is said in the guest's language with the right grammatical gender.
   assert.match(prompt, /virtual Assistant of The R Villas Bali/);
   assert.match(prompt, /die virtuelle Assistentin/);
