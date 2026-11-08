@@ -10,12 +10,12 @@ const calls = { elev8: [], saved: [] };
 const mk = (over = {}) => ({
   env: { DEAL_CODES: 'on' },
   villa: async (k) => ({ key: k, name: 'The R Villa Samalas', url: 'https://www.elevate-villas.com/property/samalas' }),
-  isCategory: (k) => k.startsWith('apt-') || k === 'merapi',
+  unsupported: (k) => k === 'merapi',
   maxGuests: () => 8,
   checkDates: (i) => ({ ci: i.check_in, co: i.check_out }),
   quote: async () => ({ ok: true, currency: 'CHF', total: 500, total_incl_fees: 500 }),
   convert: async ({ amount, to }) => ({ ok: true, converted: to === 'IDR' ? amount * 18000 : amount * 1.1 }),
-  listingName: async () => 'The R Villa Samalas | 4BR Retreat in Pererenan',
+  listingNames: async (p) => (p.key.startsWith('apt-') ? ['APT 8 - THE R APARTMENTS Mezzanine', 'APT 9 - THE R APARTMENTS Mezzanine', 'APT 10 - THE R APARTMENTS Mezzanine', 'APT 11 - THE R APARTMENTS Mezzanine'] : ['The R Villa Samalas | 4BR Retreat in Pererenan']),
   elev8: async (name, args) => { calls.elev8.push({ name, args }); return {}; },
   q: async (sql, params) => {
     if (/count\(\*\)/.test(sql)) return [{ n: over.countToday ?? 0 }];
@@ -55,7 +55,7 @@ await t('codes: format and no look-alike characters', () => {
   assert.notEqual(makeCode(), makeCode());
 });
 await t('promo arguments: one use, one villa, the one stay, valid until the next day', () => {
-  const a = promoArgs({ website: 'www.elevate-villas.com', code: 'LEA-ABC234', percent: 7.78, listingName: 'X', checkIn: '2026-12-01', today: '2026-11-10' });
+  const a = promoArgs({ website: 'www.elevate-villas.com', code: 'LEA-ABC234', percent: 7.78, listingNames: ['X'], checkIn: '2026-12-01', today: '2026-11-10' });
   assert.equal(a.quota, 1);
   assert.equal(a.quota_per_user, 1);
   assert.equal(a.discount_kind, 1);
@@ -69,10 +69,10 @@ await t('promo arguments: one use, one villa, the one stay, valid until the next
   for (const k of ['booking_from_date', 'booking_until_date', 'currency', 'description', 'discount_amount', 'discount_kind', 'listings', 'name', 'percentage_discount', 'promo_code', 'quota', 'quota_per_user', 'stay_from_date', 'stay_until_date', 'upsell', 'upsell_item', 'website']) assert.ok(k in a, k);
 });
 await t('promo arguments: the window ends at check-in at the latest; a test code is already expired', () => {
-  assert.equal(promoArgs({ website: 'w', code: 'C', percent: 5, listingName: 'X', checkIn: '2026-11-10', today: '2026-11-10' }).booking_until_date, '2026-11-10');
+  assert.equal(promoArgs({ website: 'w', code: 'C', percent: 5, listingNames: ['X'], checkIn: '2026-11-10', today: '2026-11-10' }).booking_until_date, '2026-11-10');
   // never longer than the next day, however far away the stay is
-  assert.equal(promoArgs({ website: 'w', code: 'C', percent: 5, listingName: 'X', checkIn: '2027-03-01', today: '2026-11-10' }).booking_until_date, '2026-11-11');
-  const x = promoArgs({ website: 'w', code: 'C', percent: 1, listingName: 'X', checkIn: '2026-12-01', today: '2026-11-10', testOnly: true });
+  assert.equal(promoArgs({ website: 'w', code: 'C', percent: 5, listingNames: ['X'], checkIn: '2027-03-01', today: '2026-11-10' }).booking_until_date, '2026-11-11');
+  const x = promoArgs({ website: 'w', code: 'C', percent: 1, listingNames: ['X'], checkIn: '2026-12-01', today: '2026-11-10', testOnly: true });
   assert.ok(x.booking_until_date < '2026-11-10' && x.booking_from_date < x.booking_until_date);
 });
 await t('off by default: no code, the team is told', async () => {
@@ -124,9 +124,8 @@ await t('more than 10% under the price is refused and nothing is created', async
   assert.match(r.note, /team/);
   assert.equal(calls.elev8.length, 0);
 });
-await t('apartments and Merapi, too many guests, daily limit: refused', async () => {
+await t('Merapi, too many guests, daily limit: refused', async () => {
   reset();
-  assert.equal((await createDealCode({ ...input, villa: 'apt-studio' }, mk())).ok, false);
   assert.equal((await createDealCode({ ...input, villa: 'merapi' }, mk())).ok, false);
   assert.equal((await createDealCode({ ...input, adults: 9 }, mk())).ok, false);
   const limit = await createDealCode(input, mk({ countToday: 10 }));
@@ -142,11 +141,25 @@ await t('Elev8 refuses (for example no permission): a note, no link, no throw', 
   assert.match(r.note, /could not be created/);
   assert.equal(calls.saved.length, 0);
 });
-await t('the villa must be found exactly once in Elev8', async () => {
+await t('the villa must be found in Elev8', async () => {
   reset();
-  const r = await createDealCode(input, mk({ listingName: async () => null }));
+  const r = await createDealCode(input, mk({ listingNames: async () => [] }));
   assert.equal(r.ok, false);
   assert.equal(calls.elev8.length, 0);
+});
+await t('apartment category: one code for every unit of the category', async () => {
+  reset();
+  const r = await createDealCode({ ...input, villa: 'apt-mezzanine', adults: 3, agreed_price: 8_300_000 }, mk());
+  assert.ok(r.ok, r.note);
+  assert.equal(calls.elev8.length, 1);
+  assert.equal(calls.elev8[0].args.listings.length, 4);
+  assert.ok(calls.elev8[0].args.listings.every((x) => /^APT \d+ - /.test(x)));
+  assert.equal(calls.elev8[0].args.quota, 1);
+  assert.match(r.note, /every unit of this category/);
+  assert.match(r.note, /Never name a unit/);
+  // a villa does not get that sentence
+  const v = await createDealCode(input, mk());
+  assert.doesNotMatch(v.note, /every unit/);
 });
 await t('dry run writes nothing and shows the arguments', async () => {
   reset();

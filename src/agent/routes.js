@@ -160,18 +160,24 @@ const agentTools = () => (dealCodesOn() ? [...TOOLS, DEAL_TOOL] : TOOLS);
 function dealDeps() {
   return {
     villa,
-    isCategory: (key) => Boolean(categoryOf(key)),
+    // Apartment categories work (the code covers every unit); Merapi (rooms) is left to the team.
+    unsupported: (key) => categoryOf(key)?.kind === 'room',
     maxGuests,
     checkDates,
     quote: (i) => execute('get_prices', i),
     convert,
-    // The exact name of the listing in Elev8: the code is limited to this one villa.
-    listingName: async (p, ci) => {
-      const short = p.name.replace(/^The R Villa\s+/i, '');
+    // The exact names in Elev8 the code is limited to: the one villa, or every unit of an apartment category (their internal names are unique).
+    listingNames: async (p, ci) => {
       const to = new Date(Date.parse(`${ci}T00:00:00Z`) + 2 * 86400000).toISOString().slice(0, 10);
+      const cat = categoryOf(p.key);
+      if (cat) {
+        const res = await elev8Tool('get_blocked_dates', { from_date: ci, to_date: to, listing_name: cat.query, listing_tag: '' });
+        return [...new Set((res?.results || []).filter(cat.pick).map((r) => r.internal_name).filter(Boolean))];
+      }
+      const short = p.name.replace(/^The R Villa\s+/i, '');
       const res = await elev8Tool('get_blocked_dates', { from_date: ci, to_date: to, listing_name: short, listing_tag: '' });
       const hits = (res?.results || []).filter((r) => `${r.internal_name} ${r.listing_name}`.toLowerCase().includes(short.toLowerCase()));
-      return hits.length === 1 ? hits[0].listing_name : null;
+      return hits.length === 1 ? [hits[0].listing_name] : [];
     },
     elev8: elev8Tool,
     q,
