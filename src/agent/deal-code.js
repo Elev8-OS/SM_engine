@@ -72,6 +72,21 @@ export async function codeFor(guestName, taken = async () => false, random = mak
   return random();
 }
 
+/**
+ * How a code is limited to an apartment group (1-3, 4-7, 8-11). In Elev8 the units of a group share one listing id, each unit is a row of its own,
+ * and the rows of a group carry two listing names (for the mezzanines "8 - 11 Mezzanine" and "The R Pererenan Mezzanine Apartment w/ balcony").
+ * create_promo_code wants a name that matches exactly one row and stores the listing name of that row. So one unit per distinct listing name is
+ * named by its internal name, which is unique, and the code ends up with both names of the group (checked on 8 Nov 2026 with expired probe codes).
+ */
+export function unitListingRefs(rows, pick) {
+  const byName = new Map();
+  for (const r of [...(rows || [])].filter(pick).sort((a, b) => String(a.internal_name).localeCompare(String(b.internal_name), 'en', { numeric: true }))) {
+    const name = String(r.listing_name || '').trim();
+    if (name && r.internal_name && !byName.has(name)) byName.set(name, r.internal_name);
+  }
+  return [...byName.values()];
+}
+
 const addDays = (day, n) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
 
 /**
@@ -156,7 +171,7 @@ export async function createDealCode(input, deps, { dryRun = false, force = fals
       }
     }
     const listingNames = await deps.listingNames(p, ci);
-    // null means every listing (apartment categories, see routes.js); an empty list means the villa was not found.
+    // null means every listing; an empty list means the villa or the apartment group was not found.
     if (listingNames !== null && !listingNames?.length) return fail('The villa was not found in Elev8.');
     // The code carries the guest's name (LEA-ANNA). One that exists already, in our records or in Elev8, gets a number.
     const tried = new Set();
