@@ -47,6 +47,23 @@ export function planDeal({ offered, agreed } = {}) {
   return { ok: true, percent, clamped, expected_price: Math.round(o * (1 - percent / 100)), offered: Math.round(o) };
 }
 
+/**
+ * Total of the PriceLabs `price` field over the nights of a stay, null when a night has no price.
+ * This is what the booking page adds up: on 8 Nov 2026 a 7 night Mezzanine stay showed CHF 674, exactly the sum of `price`,
+ * while get_prices (what Lea quotes) sums `user_price`, the price pushed to the booking channels, here CHF 688.
+ * A percentage code is worked out against the price of the booking page, so that the page shows the agreed price.
+ */
+export function sitePriceTotal(rows, checkIn, checkOut) {
+  const byDate = new Map((rows || []).map((r) => [r.date, r]));
+  const nights = nightsBetween(checkIn, checkOut);
+  const per = nights.map((d) => {
+    const r = byDate.get(d);
+    return r && !r.unbookable && r.price > 0 ? r.price : null;
+  });
+  if (!nights.length || per.some((p) => p === null)) return null;
+  return per.reduce((a, b) => a + b, 0);
+}
+
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 /** LEA-XXXXXX, no look-alike characters. */
 export function makeCode(bytes = crypto.randomBytes(6)) {
@@ -111,10 +128,12 @@ export async function createDealCode(input, deps, { dryRun = false, force = fals
     if (!(agreedIn > 0)) return fail('The agreed price is missing.');
     const agreed = input.basis === 'per_night' ? agreedIn * nights : agreedIn;
 
-    // What the booking page asks for this stay: the same price Lea quoted (stay total, with fees where a fact sheet has them), in the currency of the agreement.
+    // What the booking page asks for this stay, in the currency of the agreement.
     const price = await deps.quote({ villa: p.key, check_in: ci, check_out: co });
     if (!price?.ok) return fail('No price is available for these dates.');
-    const offeredCHF = price.total_incl_fees ?? price.total;
+    // The booking page price (site_total) when known, plus the fees Lea quotes on top; else the quoted total.
+    const fees = Number.isFinite(price.total_incl_fees) ? price.total_incl_fees - price.total : 0;
+    const offeredCHF = Number.isFinite(price.site_total) ? price.site_total + fees : price.total_incl_fees ?? price.total;
     const conv = price.currency === cur ? { ok: true, converted: offeredCHF } : await deps.convert({ amount: offeredCHF, from: price.currency, to: cur });
     if (!conv.ok) return fail('The price could not be converted.');
     const plan = planDeal({ offered: conv.converted, agreed });
