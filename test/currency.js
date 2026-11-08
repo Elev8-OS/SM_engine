@@ -122,6 +122,17 @@ await t('tool definitions and prompt', () => {
   assert.deepEqual(TOOLS.find((x) => x.name === 'convert_currency').input_schema.required, ['amount', 'from', 'to']);
   const prompt = systemPrompt('2026-11-03');
   assert.match(prompt, /convert_currency/);
-  assert.match(prompt, /pass it as currency/);
+  // Guests are quoted in IDR with about USD (the catalog), and the booking link carries the currency that was quoted.
+  assert.match(prompt, /quote every price in IDR with the approximate USD amount/);
+  assert.match(prompt, /Never quote CHF unless the guest asks for it/);
+  assert.match(prompt, /Always pass currency \(3-letter code\): IDR/);
+  // The title is said in the guest's language with the right grammatical gender.
+  assert.match(prompt, /virtual Assistant of The R Villas Bali/);
+  assert.match(prompt, /die virtuelle Assistentin/);
+  assert.doesNotMatch(prompt, /Sales Assistant/);
+  // The default currency can be changed with AGENT_DEFAULT_CURRENCY.
+  process.env.AGENT_DEFAULT_CURRENCY = 'eur';
+  assert.match(systemPrompt('2026-11-03'), /quote every price in EUR/);
+  delete process.env.AGENT_DEFAULT_CURRENCY;
 });
 console.log(`\n${n} tests passed`);
