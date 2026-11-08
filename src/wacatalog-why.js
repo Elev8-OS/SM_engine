@@ -67,11 +67,22 @@ export async function whyState(part = 1) {
       const r = await graph('GET', `${catalog}/products`, { fields: 'retailer_id,review_status,review_rejection_reasons,visibility,availability,status', limit: 1 });
       return JSON.stringify(r.data?.[0] ?? {}).slice(0, 260);
     }));
-  } else {
+  } else if (part === 6) {
     // Who is connected to the WhatsApp account and the catalog: the apps that receive its events and the users with access.
     lines.push(await step('apps', async () => ((await graph('GET', `${s.wabaId}/subscribed_apps`)).data || []).map((x) => x.whatsapp_business_api_data?.name || x.name || x.id).join(' ; ') || 'none'));
     lines.push(await step('waba users', async () => ((await graph('GET', `${s.wabaId}/assigned_users`, { business: s.businessId, fields: 'name,tasks' })).data || []).map((x) => `${x.name}[${(x.tasks || []).join(',')}]`).join(' ; ') || 'none'));
     lines.push(await step('catalog users', async () => ((await graph('GET', `${catalog}/assigned_users`, { business: s.businessId, fields: 'name,tasks' })).data || []).map((x) => `${x.name}[${(x.tasks || []).join(',')}]`).join(' ; ') || 'none'));
+  } else if (part === 7) {
+    // What the token of the engine is: app, type, expiry, and the permissions it holds. The token itself is never shown.
+    const dbg = async () => (await graph('GET', 'debug_token', { input_token: process.env.META_ADS_TOKEN })).data || {};
+    lines.push(await step('token', async () => {
+      const d = await dbg();
+      return `app ${d.application || '?'} ${d.app_id || ''} | type ${d.type} | valid ${d.is_valid} | expires ${d.expires_at || 'never'} | issued ${d.issued_at || '?'}`;
+    }));
+    lines.push(await step('scopes', async () => ((await dbg()).scopes || []).join(',') || 'none'));
+  } else {
+    // The permissions of the token per asset: which WhatsApp accounts, catalogs and businesses each permission reaches.
+    lines.push(await step('granular', async () => ((await graph('GET', 'debug_token', { input_token: process.env.META_ADS_TOKEN })).data?.granular_scopes || []).map((g) => `${g.scope}:${(g.target_ids || []).join('/') || 'all'}`).join(' ; ').slice(0, 900) || 'none'));
   }
   return { part, s: lines.join(' || ') };
 }
