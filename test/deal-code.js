@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { planDeal, makeCode, nameToken, codeFor, promoArgs, createDealCode, dealCodesOn, DEAL_TOOL } from '../src/agent/deal-code.js';
+import { planDeal, makeCode, nameToken, codeFor, promoArgs, createDealCode, dealCodesOn, unitListingRefs, DEAL_TOOL } from '../src/agent/deal-code.js';
+import { CATEGORIES } from '../src/agent/multiunit.js';
 import { priceSummary } from '../src/agent/tools.js';
 import { budgetCheck } from '../src/agent/negotiation.js';
 
@@ -16,7 +17,7 @@ const mk = (over = {}) => ({
   checkDates: (i) => ({ ci: i.check_in, co: i.check_out }),
   quote: async () => ({ ok: true, currency: 'CHF', total: 500, total_incl_fees: 500 }),
   convert: async ({ amount, to }) => ({ ok: true, converted: to === 'IDR' ? amount * 18000 : amount * 1.1 }),
-  listingNames: async (p) => (p.key.startsWith('apt-') ? null : ['The R Villa Samalas | 4BR Retreat in Pererenan']),
+  listingNames: async (p) => (p.key.startsWith('apt-') ? ['ID - APT 8 - THE R APARTMENTS Mezzanine w/ balcony', 'ID - APT 09 - THE R APARTMENTS Mezzanine w/ balcony'] : ['The R Villa Samalas | 4BR Retreat in Pererenan']),
   codeTaken: async () => false,
   elev8: async (name, args) => { calls.elev8.push({ name, args }); return {}; },
   q: async (sql, params) => {
@@ -247,13 +248,14 @@ await t('the villa must be found in Elev8', async () => {
   assert.equal(r.ok, false);
   assert.equal(calls.elev8.length, 0);
 });
-await t('apartment category: the code is not tied to one row, it stays safe through single use, dates and one day', async () => {
+await t('apartment group: the code is limited to the group, with both of its listing names', async () => {
   reset();
   const r = await createDealCode({ ...input, villa: 'apt-mezzanine', adults: 3, agreed_price: 8_300_000 }, mk());
   assert.ok(r.ok, r.note);
   assert.equal(calls.elev8.length, 1);
   const a = calls.elev8[0].args;
-  assert.equal(a.listings, null);
+  assert.equal(a.listings.length, 2);
+  assert.ok(a.listings.every((x) => /^ID - APT \d+ - /.test(x)));
   assert.equal(a.quota, 1);
   assert.equal(a.quota_per_user, 1);
   assert.equal(a.stay_from_date, '2026-12-01');
@@ -261,11 +263,45 @@ await t('apartment category: the code is not tied to one row, it stays safe thro
   assert.equal(a.booking_until_date, '2026-11-11');
   assert.match(r.note, /every unit of this category/);
   assert.match(r.note, /Never name a unit/);
-  // a villa is tied to its listing and does not get that sentence
+  // a villa is tied to its one listing and does not get that sentence
   reset();
   const v = await createDealCode(input, mk());
   assert.deepEqual(calls.elev8[0].args.listings, ['The R Villa Samalas | 4BR Retreat in Pererenan']);
   assert.doesNotMatch(v.note, /every unit/);
+});
+// the rows of get_blocked_dates for "APT", as Elev8 returns them (names as seen on 8 Nov 2026)
+const row = (internal, listing) => ({ internal_name: `ID - ${internal}`, listing_name: listing });
+const APT_ROWS = [
+  row('APT 1 - The R Pererenan Mezzanine| Studio + Plunge Pool', '1 - 3 Plunge Pool'),
+  row('APT 2 - The R Pererenan Mezzanine| Studio + Plunge Pool', 'The R Pererenan Mezzanine Studio + Plunge Pool'),
+  row('APT 3 - The R Pererenan Mezzanine| Studio + Plunge Pool', 'The R Pererenan Mezzanine Studio + Plunge Pool'),
+  row('APT 4 - THE R APARTMENTS Studio', 'THE R APARTMENTS Studio'),
+  row('APT 5 - THE R APARTMENTS Studio', 'The R Apartments Studio walk to the Beach'),
+  row('APT 6 - THE R APARTMENTS Studio', 'The R Apartments Studio walk to the Beach'),
+  row('APT 7 - THE R APARTMENTS Studio', 'The R Apartments Studio walk to the Beach'),
+  row('APT 8 - THE R APARTMENTS Mezzanine w/ balcony', '8 - 11 Mezzanine'),
+  row('APT 09 - THE R APARTMENTS Mezzanine w/ balcony', 'The R Pererenan Mezzanine Apartment w/ balcony'),
+  row('APT 10 - THE R APARTMENTS Mezzanine w/ balcony', 'The R Pererenan Mezzanine Apartment w/ balcony'),
+  row('APT 11 - THE R APARTMENTS Mezzanine w/ balcony', 'The R Pererenan Mezzanine Apartment w/ balcony')
+];
+await t('each group is named by one unit per listing name, with the unique internal name', () => {
+  assert.deepEqual(unitListingRefs(APT_ROWS, CATEGORIES['apt-mezzanine'].pick), ['ID - APT 8 - THE R APARTMENTS Mezzanine w/ balcony', 'ID - APT 09 - THE R APARTMENTS Mezzanine w/ balcony']);
+  assert.deepEqual(unitListingRefs(APT_ROWS, CATEGORIES['apt-studio'].pick), ['ID - APT 4 - THE R APARTMENTS Studio', 'ID - APT 5 - THE R APARTMENTS Studio']);
+  assert.deepEqual(unitListingRefs(APT_ROWS, CATEGORIES['apt-plunge'].pick), ['ID - APT 1 - The R Pererenan Mezzanine| Studio + Plunge Pool', 'ID - APT 2 - The R Pererenan Mezzanine| Studio + Plunge Pool']);
+});
+await t('the units of other groups are not named', () => {
+  for (const c of ['apt-studio', 'apt-mezzanine', 'apt-plunge']) {
+    const refs = unitListingRefs(APT_ROWS, CATEGORIES[c].pick);
+    assert.equal(refs.length, 2);
+    const nums = refs.map((x) => Number(/APT (\d+)/.exec(x)[1]));
+    const [lo, hi] = { 'apt-plunge': [1, 3], 'apt-studio': [4, 7], 'apt-mezzanine': [8, 11] }[c];
+    assert.ok(nums.every((x) => x >= lo && x <= hi), `${c}: ${nums}`);
+  }
+});
+await t('no rows: nothing is named, the team decides', () => {
+  assert.deepEqual(unitListingRefs([], CATEGORIES['apt-mezzanine'].pick), []);
+  assert.deepEqual(unitListingRefs(undefined, CATEGORIES['apt-mezzanine'].pick), []);
+  assert.deepEqual(unitListingRefs(APT_ROWS.map((r) => ({ ...r, listing_name: '' })), CATEGORIES['apt-mezzanine'].pick), []);
 });
 await t('dry run writes nothing and shows the arguments', async () => {
   reset();
