@@ -56,7 +56,7 @@ export function makeCode(bytes = crypto.randomBytes(6)) {
 const addDays = (day, n) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
 
 /**
- * Arguments of Elev8's create_promo_code: one use, the listing of the villa (or of the apartment category), valid until the next day at the latest.
+ * Arguments of Elev8's create_promo_code: one use, the listing of the villa (null: every listing, used for apartment categories), valid until the next day at the latest.
  * The stay window runs from check-in to check-out: the booking page checks the whole stay against it, a window of the check-in day alone refuses a stay of several nights.
  */
 export function promoArgs({ website, code, percent, listingNames, checkIn, checkOut, today, testOnly = false }) {
@@ -89,7 +89,7 @@ const keyOf = (v) => crypto.createHash('sha1').update(v).digest('hex').slice(0, 
 /**
  * Orchestrates one deal code. deps are injected so the logic is testable without network:
  * villa(key), unsupported(key), maxGuests(p), checkDates(input), quote(input) -> price summary, convert({amount,from,to}),
- * listingNames(p, checkIn) -> the Elev8 names the code is limited to (one for a villa, every unit for an apartment category), elev8(name, args), q(sql, params), today(), env.
+ * listingNames(p, checkIn) -> the Elev8 listing name the code is limited to (a villa), or null for no restriction (apartment categories), elev8(name, args), q(sql, params), today(), env.
  * Never throws: a problem comes back as a note for the model. force skips the DEAL_CODES switch (manual test route).
  */
 export async function createDealCode(input, deps, { dryRun = false, force = false, testOnly = false } = {}) {
@@ -136,7 +136,8 @@ export async function createDealCode(input, deps, { dryRun = false, force = fals
       }
     }
     const listingNames = await deps.listingNames(p, ci);
-    if (!listingNames?.length) return fail('The villa or its units were not found in Elev8.');
+    // null means every listing (apartment categories, see routes.js); an empty list means the villa was not found.
+    if (listingNames !== null && !listingNames?.length) return fail('The villa was not found in Elev8.');
     code = code || makeCode();
     const args = promoArgs({ website: SITE(env), code, percent: plan.percent, listingNames, checkIn: ci, checkOut: co, today: day, testOnly });
     if (dryRun) return { ok: true, dry_run: true, plan, offered_in_currency: Math.round(conv.converted), currency: cur, agreed_total: Math.round(agreed), nights, create_promo_code_args: args };
@@ -164,7 +165,7 @@ export async function createDealCode(input, deps, { dryRun = false, force = fals
       note:
         `Share booking_link exactly: the code ${code} is already in it. Tell the guest all of this, in the guest's language and in your own words: (1) the code works for this one booking only and is valid until ${args.booking_until_date}; (2) a booking is never confirmed without a completed payment; (3) until the payment is made, the villa can still be booked by someone else, so the dates are not held. ` +
         `The booking page should show about ${plan.expected_price} ${cur} for the stay (the page converts currencies with its own rate, so a small difference is possible: say "about"). ` +
-        `${listingNames.length > 1 ? 'The code works for every unit of this category: the booking page shows which unit is free. Never name a unit. ' : ''}` +
+        `${!listingNames || listingNames.length > 1 ? 'The code works for every unit of this category: the booking page shows which unit is free. Never name a unit. ' : ''}` +
         `${plan.clamped ? 'The limit was reached, so the price is the lowest allowed: use expected_price in your message. ' : ''}` +
         `Call submit_reply with needs_human false and a short reason that names the code, the villa, the dates and the agreed price.`
     };

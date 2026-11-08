@@ -15,7 +15,7 @@ const mk = (over = {}) => ({
   checkDates: (i) => ({ ci: i.check_in, co: i.check_out }),
   quote: async () => ({ ok: true, currency: 'CHF', total: 500, total_incl_fees: 500 }),
   convert: async ({ amount, to }) => ({ ok: true, converted: to === 'IDR' ? amount * 18000 : amount * 1.1 }),
-  listingNames: async (p) => (p.key.startsWith('apt-') ? ['APT 8 - THE R APARTMENTS Mezzanine', 'APT 9 - THE R APARTMENTS Mezzanine', 'APT 10 - THE R APARTMENTS Mezzanine', 'APT 11 - THE R APARTMENTS Mezzanine'] : ['The R Villa Samalas | 4BR Retreat in Pererenan']),
+  listingNames: async (p) => (p.key.startsWith('apt-') ? null : ['The R Villa Samalas | 4BR Retreat in Pererenan']),
   elev8: async (name, args) => { calls.elev8.push({ name, args }); return {}; },
   q: async (sql, params) => {
     if (/count\(\*\)/.test(sql)) return [{ n: over.countToday ?? 0 }];
@@ -157,18 +157,24 @@ await t('the villa must be found in Elev8', async () => {
   assert.equal(r.ok, false);
   assert.equal(calls.elev8.length, 0);
 });
-await t('apartment category: one code for every unit of the category', async () => {
+await t('apartment category: the code is not tied to one row, it stays safe through single use, dates and one day', async () => {
   reset();
   const r = await createDealCode({ ...input, villa: 'apt-mezzanine', adults: 3, agreed_price: 8_300_000 }, mk());
   assert.ok(r.ok, r.note);
   assert.equal(calls.elev8.length, 1);
-  assert.equal(calls.elev8[0].args.listings.length, 4);
-  assert.ok(calls.elev8[0].args.listings.every((x) => /^APT \d+ - /.test(x)));
-  assert.equal(calls.elev8[0].args.quota, 1);
+  const a = calls.elev8[0].args;
+  assert.equal(a.listings, null);
+  assert.equal(a.quota, 1);
+  assert.equal(a.quota_per_user, 1);
+  assert.equal(a.stay_from_date, '2026-12-01');
+  assert.equal(a.stay_until_date, '2026-12-04');
+  assert.equal(a.booking_until_date, '2026-11-11');
   assert.match(r.note, /every unit of this category/);
   assert.match(r.note, /Never name a unit/);
-  // a villa does not get that sentence
+  // a villa is tied to its listing and does not get that sentence
+  reset();
   const v = await createDealCode(input, mk());
+  assert.deepEqual(calls.elev8[0].args.listings, ['The R Villa Samalas | 4BR Retreat in Pererenan']);
   assert.doesNotMatch(v.note, /every unit/);
 });
 await t('dry run writes nothing and shows the arguments', async () => {
