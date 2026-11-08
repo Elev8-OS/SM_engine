@@ -80,11 +80,33 @@ export async function sendProductMessage({ to, keys, text }) {
  * the chat (is_catalog_visible) and which catalogs are linked to the WhatsApp account. With fix (and confirm) it links the catalog again
  * and switches it visible, the same step as the first set-up. One short answer, because the probe keeps only the first part.
  */
-export async function commerceState({ fix = false, toggle = false } = {}) {
+export async function commerceState({ fix = false, toggle = false, reset = false } = {}) {
   const s = waCatalogSettings();
   const catalog = await catalogId();
   const out = { catalog, phone: null, commerce: null, linked: null, errors: [] };
   const cut = (e) => String(e?.message || e).slice(0, 120);
+  // reset: takes the catalog off the WhatsApp account and connects it again as the current system user, then switches it visible.
+  // The connect step is tried up to three times, so the catalog is never left unconnected; the state below is read after it.
+  if (reset) {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const t = { unlink: null, link: null };
+    try {
+      await graph('DELETE', `${s.wabaId}/product_catalogs`, { catalog_id: catalog });
+      t.unlink = true;
+    } catch (e) {
+      t.unlink = cut(e);
+    }
+    await sleep(6000);
+    for (let i = 0; i < 3 && t.link !== true; i++) {
+      const r = await connectCatalog();
+      if (r.linked && r.visible) t.link = true;
+      else {
+        t.link = JSON.stringify(r.errors).slice(0, 160);
+        await sleep(3000);
+      }
+    }
+    out.reset = t;
+  }
   // toggle: hides the catalog in the chat and shows it again, so Meta rebuilds what the chat shows. The "on" step is tried up to three
   // times, so the catalog is never left hidden; the state below is read after it.
   if (toggle) {
@@ -148,7 +170,9 @@ export function sendRoutes(app, needDb, ah) {
     if (fix && String(req.query.confirm || '') !== '1') throw new HttpError(400, 'fix links the catalog to the WhatsApp account again and switches it visible. Add confirm=1.');
     const toggle = String(req.query.toggle || '') === '1';
     if (toggle && String(req.query.confirm || '') !== '1') throw new HttpError(400, 'toggle hides the catalog in the chat for a few seconds and shows it again. Add confirm=1.');
-    res.json(await commerceState({ fix, toggle }));
+    const reset = String(req.query.reset || '') === '1';
+    if (reset && String(req.query.confirm || '') !== '1') throw new HttpError(400, 'reset takes the catalog off the WhatsApp account and connects it again. Add confirm=1.');
+    res.json(await commerceState({ fix, toggle, reset }));
   }));
   app.get('/wa-catalog/quote-test', needDb, ah(async (req, res) => {
     res.json(await quoteTest({ villa: String(req.query.villa || 'Bratan'), checkIn: String(req.query.in || '2026-12-05'), checkOut: String(req.query.out || '2026-12-09'), adults: Number(req.query.adults) || 3, children: Number(req.query.children) || 0 }));
