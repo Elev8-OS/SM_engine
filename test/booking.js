@@ -122,8 +122,11 @@ await t('a deal code is applied; a code Elev8 does not apply is never promised',
   assert.equal(unknown.ok, false);
   const ignored = await prepareBooking({ ...base, promo_code: 'LEA-ANNA' }, wa(5), mk({ resolveStay: async () => ({ ok: true, listingName: 'x', quote: QUOTE }) }));
   assert.equal(ignored.ok, false);
-  assert.match(ignored.note, /did not apply the code/);
-  assert.match(ignored.note, /needs_human true/);
+  assert.match(ignored.note, /does not apply the code/);
+  // the guest is not handed over: Lea shares the link with the code that create_deal_code gave her
+  assert.match(ignored.note, /booking_link that create_deal_code returned/);
+  assert.doesNotMatch(ignored.note, /Tell the guest the team will take care/);
+  assert.equal(ignored.no_chat_booking_with_code, true);
 });
 const confirm = { ...base, guest_confirmed: true, confirmed_total: 677 };
 await t('create is refused without a summary in an earlier message', async () => {
