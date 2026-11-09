@@ -91,7 +91,7 @@ export async function getThreadFull(conversationId, limit = 20) {
 }
 
 /** The phone number of a GHL contact (digits), or '' when there is none. */
-async function contactPhone(contactId) {
+export async function contactPhone(contactId) {
   const res = await fetch(`${GHL}/contacts/${encodeURIComponent(contactId)}`, { headers: { ...headers(), Version: '2021-07-28' }, signal: AbortSignal.timeout(30000) });
   const json = await res.json().catch(() => ({}));
   return res.ok ? digits(json?.contact?.phone) : '';
