@@ -37,11 +37,19 @@ export function windowOpen(thread, now = Date.now(), hours = 24) {
 export const NOT_READABLE = /message type is currently not supported/i;
 export const UNREADABLE_REPLY = 'Hi, this is the virtual assistant of The R Villas Bali. I can only read text messages here. Could you write your question as text? Thank you.';
 
+/**
+ * Photos: the engine follows every reply that links to the booking page of a villa with the catalog card of that villa (photo, title, price, a button),
+ * so a guest who asks for photos gets the card by the reply carrying the link. Tested in test/photos.js.
+ */
+export const PHOTO_NOTE =
+  'Photos: when the guest asks for photos, pictures, videos or what a villa looks like, never say that you cannot send photos. Answer in one short sentence and put the booking page link of that villa on a line of its own at the end (the booking_link of list_villas, or the link of build_booking_link when the stay is known): the catalog card of the villa with its photo and price follows your message automatically, and the page shows all photos. If the guest asks about several villas, put up to three links, one per line. If you do not know which villa the guest means, ask which one in one short question or suggest up to three that fit the stay. Never describe photos you have not seen and never promise a photo of a specific room.';
+
 /** What the prompt says on top for WhatsApp. */
 export const WA_PROMPT_NOTE = [
   'Channel: WhatsApp. The guest wrote to the sales number of The R Villas Bali, so you never need to ask for a phone number.',
   'Format: plain text in the language of the guest. At most 3 short paragraphs separated by a blank line. Put a booking link on a line of its own at the very end, with nothing after it.',
-  'Promotion codes: a guest often arrives from an ad with a ready-made first message that carries a code (for example "Hi, I saw your offer, code ELEVATEDSTAY"). Look for the code in the active_promotions of list_villas. Only a code that is found there and whose terms fit the stay may be confirmed, and then it goes into build_booking_link as promo_code. A code that is not found, has expired or does not fit the stay: say so kindly, do not promise any discount, and hand over to the team if the guest insists. Without dates or guests yet, ask for them first and say that you will check the code for those dates.'
+  'Promotion codes: a guest often arrives from an ad with a ready-made first message that carries a code (for example "Hi, I saw your offer, code ELEVATEDSTAY"). Look for the code in the active_promotions of list_villas. Only a code that is found there and whose terms fit the stay may be confirmed, and then it goes into build_booking_link as promo_code. A code that is not found, has expired or does not fit the stay: say so kindly, do not promise any discount, and hand over to the team if the guest insists. Without dates or guests yet, ask for them first and say that you will check the code for those dates.',
+  PHOTO_NOTE
 ].join('\n');
 
 /**
