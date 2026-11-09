@@ -147,8 +147,9 @@ async function priceStay(p, st, deps, fail) {
   const quote = found.quote;
   const total = Number(quote.total_price);
   if (!(total > 0) || !quote.currency) return { err: fail('Elev8 returned no usable price.') };
-  // A code that Elev8 does not apply must never be promised: the price would be wrong.
-  if (st.promo && !(Number(quote.discounts_total) > 0 || Number(quote.promo_discount) > 0)) return { err: fail(`Elev8 did not apply the code ${st.promo} to this stay.`) };
+  // A code that Elev8 does not apply must never be promised: the price would be wrong. (On 9 Nov 2026 get_quote ignored every code, even an invented one.)
+  // The guest is not handed over: the link with the code that create_deal_code made works on the booking page.
+  if (st.promo && !(Number(quote.discounts_total) > 0 || Number(quote.promo_discount) > 0)) return { err: { ok: false, no_chat_booking_with_code: true, note: `The booking system does not apply the code ${st.promo} to a booking made in the chat, so the price would be wrong. Do not create a booking. Share the booking_link that create_deal_code returned instead (the code is already in it) and follow its note. Do not hand over to the team because of this.` } };
   return { found, quote, total };
 }
 
