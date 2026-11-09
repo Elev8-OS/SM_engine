@@ -10,12 +10,13 @@ import { categoryOf, categoryRow, categoryRows, categoryAvailability, categoryPr
 import { convert } from './currency.js';
 import { budgetCheck } from './negotiation.js';
 import { DEAL_TOOL, dealCodesOn, createDealCode, unitListingRefs } from './deal-code.js';
+import { bookingOn, BOOKING_NOTE, PREPARE_TOOL, BOOK_TOOL, prepareBooking, createBooking } from './booking.js';
 import { livePromos, promoRoutes } from '../promos.js';
 import { readGuest, whyEmpty } from './read.js';
 import { loadSettings, saveSettings, settingsView, mayAutoSend } from './settings.js';
 import { notifyConfigured, buildMail, sendMail } from './notify.js';
 import { callModel, elev8Tool, pricelabsRows, sendInstagram, agentConfig, priceIds } from './clients.js';
-import { waSettings, channelOf, isOurNumber, windowOpen, findLatestConversation, getThreadFull, sendWhatsApp, NOT_READABLE, UNREADABLE_REPLY, WA_PROMPT_NOTE, swapUtm } from './whatsapp.js';
+import { waSettings, channelOf, isOurNumber, windowOpen, findLatestConversation, getThreadFull, sendWhatsApp, contactPhone, NOT_READABLE, UNREADABLE_REPLY, WA_PROMPT_NOTE, swapUtm } from './whatsapp.js';
 
 let schemaReady = null;
 function ensureSchema() {
@@ -111,8 +112,11 @@ function checkDates(input) {
   return { ci, co };
 }
 
-/** The tools the model may call. All read-only, except create_deal_code, which only exists while DEAL_CODES is on. */
-export async function execute(name, input) {
+/**
+ * The tools the model may call. All read-only, except create_deal_code (only while DEAL_CODES is on) and create_booking (only while BOOKING_IN_CHAT is on).
+ * ctx says where the message came from: { channel, contactId, inquiryId }. The booking tools need it (the phone number of the WhatsApp contact, the order of the messages).
+ */
+export async function execute(name, input, ctx = {}) {
   if (name === 'list_villas') {
     const rows = await q('select key, name, area, type, guests, size_m2, bedrooms, url, highlights, open_questions from properties order by key');
     // Promotions the team set live in the SM Manager: Lea sees them per villa and may offer only these.
@@ -125,6 +129,8 @@ export async function execute(name, input) {
   if (name === 'area_guide') return areaGuide(await villa(input.villa), input.topic);
   if (name === 'check_budget') return budgetCheck({ ...input, dealCodes: dealCodesOn() });
   if (name === 'create_deal_code') return createDealCode(input, dealDeps());
+  if (name === 'prepare_booking') return prepareBooking(input, ctx, bookingDeps());
+  if (name === 'create_booking') return createBooking(input, ctx, bookingDeps());
   if (name === 'build_booking_link') {
     const p = await villa(input.villa);
     checkDates(input);
@@ -153,8 +159,8 @@ export async function execute(name, input) {
   throw new Error(`Unknown tool ${name}`);
 }
 
-/** The tools Lea may use: the deal code tool only while the switch DEAL_CODES is on. */
-const agentTools = () => (dealCodesOn() ? [...TOOLS, DEAL_TOOL] : TOOLS);
+/** The tools Lea may use: the deal code tool only while DEAL_CODES is on, the booking tools only while BOOKING_IN_CHAT is on. */
+const agentTools = () => [...TOOLS, ...(dealCodesOn() ? [DEAL_TOOL] : []), ...(bookingOn() ? [PREPARE_TOOL, BOOK_TOOL] : [])];
 
 /** What createDealCode needs from the engine: villa lookup, the same price Lea quotes, the conversion, Elev8 and the database. */
 function dealDeps() {
@@ -188,17 +194,66 @@ function dealDeps() {
   };
 }
 
+/**
+ * What booking.js needs from the engine. resolveStay finds the listing Elev8 can book and its exact price (get_quote, the same price as the booking page):
+ * a villa is one listing; of an apartment category the units are tried in order and the first that Elev8 quotes (it refuses booked dates) is used.
+ * The listing name that was quoted is the one the booking is created for, so a unit is never guessed.
+ */
+function bookingDeps() {
+  return {
+    villa,
+    // Merapi (rooms) is left to the team.
+    unsupported: (key) => categoryOf(key)?.kind === 'room',
+    maxGuests,
+    checkDates,
+    contactPhone,
+    // Only a code that Lea created herself with create_deal_code may go into a booking.
+    promoKnown: async (code) => (await q("select 1 from agent_settings where key like 'deal:%' and value->>'code' = $1 and updated_at > now() - interval '72 hours' limit 1", [code])).length > 0,
+    resolveStay: async (p, { ci, co, adults, children, promo }) => {
+      const cat = categoryOf(p.key);
+      const to = new Date(Date.parse(`${ci}T00:00:00Z`) + 2 * 86400000).toISOString().slice(0, 10);
+      let names = [];
+      if (cat) {
+        const res = await elev8Tool('get_blocked_dates', { from_date: ci, to_date: to, listing_name: cat.query, listing_tag: '' });
+        names = (res?.results || []).filter(cat.pick).map((r) => r.internal_name).filter(Boolean).sort((a, b) => String(a).localeCompare(String(b), 'en', { numeric: true }));
+      } else {
+        const short = p.name.replace(/^The R Villa\s+/i, '');
+        const res = await elev8Tool('get_blocked_dates', { from_date: ci, to_date: to, listing_name: short, listing_tag: '' });
+        const hits = (res?.results || []).filter((r) => `${r.internal_name} ${r.listing_name}`.toLowerCase().includes(short.toLowerCase()));
+        names = hits.length === 1 ? [hits[0].listing_name] : [];
+      }
+      if (!names.length) return { ok: false, reason: 'the listing was not found in Elev8' };
+      let reason = '';
+      for (const name of names) {
+        try {
+          const quote = await elev8Tool('get_quote', { listing_name: name, check_in_date: ci, check_out_date: co, number_of_adults: adults, number_of_children: children, ...(promo ? { promo_code: promo } : {}) });
+          if (Number(quote?.total_price) > 0) return { ok: true, listingName: name, quote };
+        } catch (e) {
+          reason = String(e.message || e).replace(/^Elev8:\s*/, '').slice(0, 160);
+          // a refused code has nothing to do with the unit: the next unit would refuse it as well
+          if (/promo|code/i.test(reason)) break;
+        }
+      }
+      return { ok: false, reason: reason || 'no unit is free' };
+    },
+    elev8: elev8Tool,
+    q,
+    today
+  };
+}
+
 /** The tools for one channel: the booking links carry the tracking of that channel. */
-const executeFor = (channel) => async (name, input) => {
-  const out = await execute(name, input);
+const executeFor = (channel, ctx = {}) => async (name, input) => {
+  const out = await execute(name, input, { channel, ...ctx });
   return channel === 'whatsapp' ? swapUtm(out) : out;
 };
 
 /** The system prompt for one channel. */
 function promptFor(channel) {
   const base = systemPrompt(today());
-  if (channel !== 'whatsapp') return base;
-  return `${base.replace('You answer Instagram direct messages.', 'You answer WhatsApp messages.')}\n${WA_PROMPT_NOTE}`;
+  const note = bookingOn() ? `\n${BOOKING_NOTE(channel)}` : '';
+  if (channel !== 'whatsapp') return `${base}${note}`;
+  return `${base.replace('You answer Instagram direct messages.', 'You answer WhatsApp messages.')}\n${WA_PROMPT_NOTE}${note}`;
 }
 
 function transcript(thread, latest, guestName) {
@@ -279,7 +334,7 @@ export async function processInquiry(id, { auto = false } = {}) {
     const unreadable = channel === 'whatsapp' && NOT_READABLE.test(guestText);
     const result = unreadable
       ? { reply: UNREADABLE_REPLY, needs_human: true, reason: 'Voice message, photo or another message the assistant cannot read', intent: 'other', language: 'en', trace: [] }
-      : await runAgent({ system: promptFor(channel), userText: transcript(history, guestText, row.contact_name), tools: agentTools(), callModel, execute: executeFor(channel) });
+      : await runAgent({ system: promptFor(channel), userText: transcript(history, guestText, row.contact_name), tools: agentTools(), callModel, execute: executeFor(channel, { contactId: row.contact_id, inquiryId: id }) });
     let needsHuman = result.needs_human || !result.reply;
     let reason = result.reason;
     // A WhatsApp reply outside the 24-hour window would be refused: a template is needed, so a person decides.
@@ -342,7 +397,7 @@ export function agentPublic(app) {
 export function agentPrivate(app, needDb, ah) {
   app.get('/agent/status', ah(async (_req, res) => {
     const wa = waSettings();
-    res.json({ ...agentConfig(), notify_configured: notifyConfigured(), whatsapp: { enabled: wa.enabled, number_set: Boolean(wa.number), auto_send: wa.autoSend } });
+    res.json({ ...agentConfig(), notify_configured: notifyConfigured(), whatsapp: { enabled: wa.enabled, number_set: Boolean(wa.number), auto_send: wa.autoSend }, booking_in_chat: bookingOn(), deal_codes: dealCodesOn() });
   }));
 
   // How Lea answers (always approve, always automatic, time window), set in the SM Manager.
@@ -390,6 +445,18 @@ export function agentPrivate(app, needDb, ah) {
     res.json(await createDealCode(input, dealDeps(), { dryRun: !create, force: true, testOnly: b.test === '1' }));
   }));
 
+  // Booking in the chat, as a check. Without create=1 it only does what prepare_booking does: the exact price from Elev8 and what is missing (writes nothing but a note).
+  // Parameters: villa, check_in, check_out, adults, children, promo (a deal code of Lea), first, last, email, phone (with country code). The channel is Instagram, so the phone is needed.
+  // create=1&confirm=1 creates a REAL inquiry in Elev8 with a payment link of one hour (also while BOOKING_IN_CHAT is off). It holds the dates until the link expires.
+  app.get('/agent/booking-test', needDb, ah(async (req, res) => {
+    await ensureSchema();
+    const b = req.query;
+    const input = { villa: b.villa, check_in: b.check_in, check_out: b.check_out, adults: Number(b.adults || 2), children: Number(b.children || 0), promo_code: b.promo, guest_first_name: b.first, guest_last_name: b.last, guest_email: b.email, guest_phone: b.phone, guest_confirmed: true, confirmed_total: Number(b.total) };
+    const ctx = { channel: 'instagram', contactId: 'manual-test', inquiryId: 0 };
+    const create = b.create === '1' && b.confirm === '1';
+    res.json(create ? await createBooking(input, ctx, bookingDeps(), { force: true, testOnly: true }) : await prepareBooking(input, ctx, bookingDeps(), { force: true }));
+  }));
+
   app.get('/agent/debug', needDb, ah(async (_req, res) => {
     await ensureSchema();
     res.json({ webhooks: await q('select id, created_at, note, keys, body from webhook_debug order by id desc limit 5') });
@@ -422,11 +489,12 @@ export function agentPrivate(app, needDb, ah) {
   }));
 
   // Try the agent on a typed message. Stores nothing and sends nothing. body.channel 'whatsapp' tries the WhatsApp prompt and links.
+  // The booking tools need a real chat (the phone number, the order of the messages), so create_booking is refused here.
   app.post('/agent/test', needDb, ah(async (req, res) => {
     const message = String(req.body?.message || '').trim();
     if (!message) throw new HttpError(400, 'message is required');
     const channel = req.body?.channel === 'whatsapp' ? 'whatsapp' : 'instagram';
-    const result = await runAgent({ system: promptFor(channel), userText: transcript([], message), tools: agentTools(), callModel, execute: executeFor(channel) });
+    const result = await runAgent({ system: promptFor(channel), userText: transcript([], message), tools: agentTools(), callModel, execute: executeFor(channel, { contactId: null, inquiryId: 0 }) });
     res.json(result);
   }));
 
