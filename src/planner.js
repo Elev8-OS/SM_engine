@@ -1,6 +1,7 @@
 import { q } from './db.js';
 import { HttpError } from './util.js';
-import { slotFor, PILLARS, RULES, COPY_SCHEMA } from './strategy.js';
+import { slotFor, PILLARS, RULES, COPY_SCHEMA, AVAILABILITY_SCHEMA } from './strategy.js';
+import { AVAILABILITY, candidateWindows, pickWindow, availabilityPromptBlock } from './availability.js';
 import { AREAS } from './seed.js';
 import { activeGuidance } from './learnings.js';
 import { promptBlock, withFacts } from './facts.js';
@@ -153,6 +154,62 @@ export async function planNext(date, { propertyKey } = {}) {
   return toPlan(row);
 }
 
+/**
+ * Plans an availability post (Facebook only) for a day: a villa that is really free for 3 or more nights, starting 2 to 21 days after
+ * that day. Free stretches come from Elev8. A villa is not used twice within a week, and at most two such posts fall around one day.
+ * Returns the existing post when the day already has one. With propertyKey the villa is fixed, the weekly limits do not apply.
+ */
+export async function planAvailability(date, { propertyKey } = {}) {
+  const planDate = date.toISOString().slice(0, 10);
+  const existing = await q("select * from posts where plan_date = $1 and pillar = 'availability' and status <> 'rejected' limit 1", [planDate]);
+  if (existing.length) {
+    if (propertyKey && existing[0].property_key !== propertyKey) {
+      throw new HttpError(409, `${planDate} already has an availability post for ${existing[0].property_key} (post ${existing[0].id}). Pick another date or reject that post.`);
+    }
+    return toPlan(existing[0]);
+  }
+  if (!propertyKey) {
+    const [{ n }] = await q("select count(*)::int as n from posts where pillar = 'availability' and status <> 'rejected' and plan_date between $1::date - 6 and $1::date + 6", [planDate]);
+    if (n >= AVAILABILITY.maxPerWeek) throw new HttpError(409, `There are already ${n} availability posts within a week of ${planDate}`);
+  }
+  const recent = propertyKey ? [] : (await q("select distinct property_key from posts where pillar = 'availability' and status <> 'rejected' and plan_date >= $1::date - $2::int", [planDate, AVAILABILITY.repeatDays])).map((r) => r.property_key);
+  const candidates = (await loadCandidates()).filter((c) => c.type === 'villa' && (!propertyKey || c.key === propertyKey));
+  if (!candidates.length) throw new HttpError(404, propertyKey ? `No active villa '${propertyKey}' with approved photos` : 'No villa has approved photos');
+  const { elev8Tool } = await import('./agent/clients.js');
+  const to = new Date(date.getTime() + (AVAILABILITY.maxLead + 14) * 86400000).toISOString().slice(0, 10);
+  const blocked = await elev8Tool('get_blocked_dates', { from_date: planDate, to_date: to, listing_tag: process.env.AUDIENCE_TAG || 'indonesia', listing_name: '' });
+  const windows = candidateWindows(blocked?.results, { today: planDate });
+  const chosen = pickWindow(windows, { allowed: new Set(candidates.map((c) => c.key)), recentKeys: recent });
+  if (!chosen) throw new HttpError(404, `No villa with approved photos is free for ${AVAILABILITY.minNights}+ nights starting ${AVAILABILITY.minLead} to ${AVAILABILITY.maxLead} days after ${planDate}`);
+  const prop = candidates.find((c) => c.key === chosen.key);
+  const photos = pickPhotos(prop.photos.filter((p) => HERO_ROOMS.includes(p.room)), 1) || pickPhotos(prop.photos, 1);
+  if (!photos) throw new HttpError(404, `${prop.name} has no usable photo`);
+  const guidance = await activeGuidance();
+  const feedback = await recentFeedback();
+  const plan = {
+    planDate,
+    format: 'single',
+    pillar: 'availability',
+    angle: PILLARS.availability,
+    properties: [factsOf(prop)],
+    photos: photos.map(photoOut),
+    availability: { key: chosen.key, checkIn: chosen.checkIn, checkOut: chosen.checkOut, nights: chosen.nights },
+    platforms: ['facebook'],
+    feedback: feedback.length ? feedback : undefined,
+    rules: [...RULES, ...guidance.rules],
+    learningIds: guidance.ids.length ? guidance.ids : undefined,
+    copySchema: AVAILABILITY_SCHEMA
+  };
+  const rows = await q(
+    `insert into posts (plan_date, pillar, format, property_key, status, plan) values ($1,$2,$3,$4,'planned',$5)
+     on conflict do nothing returning *`,
+    [planDate, 'availability', 'single', prop.key, plan]
+  );
+  const row = rows[0] || (await q("select * from posts where plan_date = $1 and pillar = 'availability' and status <> 'rejected' limit 1", [planDate]))[0];
+  for (const p of photos) await q('update photos set used_count = used_count + 1, last_used_at = now() where file_id = $1', [p.file_id]);
+  return toPlan(row);
+}
+
 function buildPrompt(plan) {
   const photoLines = plan.photos.map((p, i) => `${i + 1}. [${p.room}] ${p.motif}${p.issues ? ` (note: ${p.issues})` : ''} (property: ${p.propertyKey})`).join('\n');
   const reelNote = plan.format === 'reel' ? 'This is a vertical reel of about 14 seconds. Slide 1 uses the hook. Each later photo gets one short line.' : plan.format === 'single' ? 'This is a single image. Keep the headline very short, the sub line may be empty.' : 'This is a carousel. Each slide is one photo with a headline. A closing slide is added automatically.';
@@ -166,6 +223,8 @@ function buildPrompt(plan) {
     ...(plan.pillar === 'design_details' ? [] : areaPromptBlock(plan.properties, { all: plan.pillar === 'neighbourhood' })),
     // The offer: exactly the promotion that is active, or none at all.
     ...promoPromptBlock(plan.promotions),
+    // Free dates for availability posts: only these dates may appear
+    ...availabilityPromptBlock(plan.availability),
     // What the team said when it rejected earlier posts
     ...feedbackPromptBlock(plan.feedback),
     '', `PHOTOS in order (${plan.photos.length}):`, photoLines,

@@ -12,6 +12,7 @@ import { checkFacts, factNumbers } from './facts.js';
 import { checkArea } from './area.js';
 import { checkPromoCopy } from './promo-rules.js';
 import { moodFor } from './music-rules.js';
+import { checkAvailability } from './availability.js';
 
 const SITE = 'elevate-villas.com'; // shown as plain text, never as a button
 const BANNED = ['leverage', 'synergy', 'synergies', 'ecosystem', 'world-class', 'best-in-class', 'innovative solution', 'unlock', 'seamless', 'actualize'];
@@ -35,8 +36,10 @@ export function checkCopy(copy, plan) {
   warnings.push(...checkFacts(copy, plan));
   warnings.push(...checkArea(copy, plan)); // places, walking times, prices and ratings of places
   warnings.push(...checkPromoCopy(copy, plan)); // offers and codes: only the active promotion may appear
-  if (!copy.captions?.instagram) warnings.push('Missing Instagram caption');
-  if (!Array.isArray(copy.hashtags) || copy.hashtags.length < 3) warnings.push('Too few hashtags');
+  warnings.push(...checkAvailability(copy, plan)); // free dates only inside the window, no price or pressure
+  const platforms = Array.isArray(plan.platforms) && plan.platforms.length ? plan.platforms : ['instagram'];
+  for (const p of platforms) if (!copy.captions?.[p]) warnings.push(`Missing ${p[0].toUpperCase()}${p.slice(1)} caption`);
+  if (platforms.includes('instagram') && (!Array.isArray(copy.hashtags) || copy.hashtags.length < 3)) warnings.push('Too few hashtags');
   return warnings;
 }
 
