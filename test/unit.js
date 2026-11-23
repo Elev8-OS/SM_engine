@@ -7,7 +7,7 @@ let n = 0;
 const t = (name, fn) => { fn(); n++; console.log('ok', name); };
 
 const samalas = { key: 'samalas', name: 'The R Villa Samalas', area: 'Pererenan', type: 'villa', guests: 8, size_m2: 300, bedrooms: '4', url: 'https://www.elevate-villas.com/property/the-r-villa-samalas-4br-retreat-in-pererenan-a1200ded', highlights: 'Retreat in Pererenan', open_questions: 'old' };
-const plain = { key: 'luwa', name: 'The R Villa Luwa', area: 'Pererenan', type: 'villa', guests: 10, bedrooms: '5', url: 'https://www.elevate-villas.com/property/luwa', open_questions: 'Facts to be confirmed' };
+const plain = { key: 'testvilla', name: 'The R Villa Testvilla', area: 'Pererenan', type: 'villa', guests: 10, bedrooms: '5', url: 'https://www.elevate-villas.com/property/testvilla', open_questions: 'Facts to be confirmed' };
 
 // booking link
 t('link has the four parameters with the agreed names', () => {
