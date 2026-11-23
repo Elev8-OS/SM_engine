@@ -6,13 +6,14 @@ export const WEEK = {
   4: { format: 'reel', pillar: 'neighbourhood' },
   5: { format: 'carousel', pillar: 'workation_or_book_direct' },
   6: { format: 'reel', pillar: 'villa_spotlight' },
-  7: { format: 'carousel', pillar: 'villa_spotlight' }
+  7: { format: 'carousel', pillar: 'spotlight_or_angles' }
 };
 
 export const PILLARS = {
   villa_spotlight: 'One villa, one angle: the view, the pool or a walk through the rooms. Put the reader inside one moment of the stay, calm, specific and visual.',
   which_villa_for: 'Match villas to groups, for example couples, families or friends travelling together. One slide per villa: the headline paints the moment that group would love, the sub line names the villa. Use guest numbers and size from the facts.',
   design_details: 'A single design detail: light, materials, bathroom, kitchen or pool. Quiet mood, almost no text, one feeling the reader can sense.',
+  villa_angles: 'One villa, several angles. Treat the villa like one day of a stay: each slide is a different moment (waking up, midday by the pool, evening on the terrace) and stands on its own as a small post. Pick the moment from what each photo shows, never from invented details.',
   neighbourhood: 'The area around the villa. Use only the area facts provided, never invent places or distances.',
   workation: 'Working from a villa: desk, WiFi, view, longer stays. Only for properties that have a workspace in the facts.',
   book_direct: 'Why booking direct is better: best rate guaranteed, no platform in between, direct contact with the team. No invented discounts.'
@@ -25,6 +26,7 @@ export const RULES = [
   'Facts stay strict. Use only the facts provided and what the photo descriptions show. Never invent amenities, distances, prices, discounts, review quotes, weather, sounds, smells, staff or services.',
   'Headlines on slides: 3 to 8 words, no more than 70 characters. Each one is a small feeling or image, not a label. Not "Private pool" but "Slow mornings by your own pool".',
   'Never claim a number of bedrooms or guests that is not in the facts. Use numbers only where they help the picture, for example room for all of you.',
+  'Hooks: before you write the hook, think of three different openings in different styles: curiosity (a question the photo answers), surprise (a specific detail the reader would not expect, taken from the facts), contrast (two moments side by side, for example no alarm clock, only rice fields), open loop (a line that makes the reader want the next slide) or moment (a plain scene the reader can step into). Choose the strongest one and set hookType to its style. A hook never promises more than the facts and photos show.',
   'The call to action is to book direct on the website. Instagram and TikTok captions end with "Link in bio". Facebook captions never mention the bio and never contain a URL: the booking link is added automatically.'
 ];
 
@@ -45,11 +47,16 @@ export function slotFor(date) {
   if (slot.pillar === 'workation_or_book_direct') {
     slot.pillar = isoWeek(date) % 2 === 0 ? 'workation' : 'book_direct';
   }
+  if (slot.pillar === 'spotlight_or_angles') {
+    // Sunday alternates: one villa in focus, then one villa told through several moments of a day.
+    slot.pillar = isoWeek(date) % 2 === 0 ? 'villa_angles' : 'villa_spotlight';
+  }
   return slot;
 }
 
 export const COPY_SCHEMA = {
-  hook: 'Reel only: opening line, max 60 characters, a moment or feeling that makes the viewer picture themselves there',
+  hook: 'Reel only: opening line, max 60 characters, a moment or feeling that makes the viewer picture themselves there. Use the hook style you chose under the hook rule',
+  hookType: 'One of: curiosity, surprise, contrast, open_loop, moment. The style of the hook (for a carousel or single image, the style of the first headline)',
   subhook: 'Reel only: small line under the hook, optional',
   lines: 'One entry per photo in the given order: { headline (max 70 characters, a feeling or image, not a label), sub (optional, max 60, may carry the plain fact such as the villa name) }. For the first photo of a reel use the hook instead.',
   endCard: '{ title, subtitle } for the last slide or reel end card. The website address is added automatically',
