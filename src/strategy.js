@@ -14,6 +14,7 @@ export const PILLARS = {
   which_villa_for: 'Match villas to groups, for example couples, families or friends travelling together. One slide per villa: the headline paints the moment that group would love, the sub line names the villa. Use guest numbers and size from the facts.',
   design_details: 'A single design detail: light, materials, bathroom, kitchen or pool. Quiet mood, almost no text, one feeling the reader can sense.',
   villa_angles: 'One villa, several angles. Treat the villa like one day of a stay: each slide is a different moment (waking up, midday by the pool, evening on the terrace) and stands on its own as a small post. Pick the moment from what each photo shows, never from invented details.',
+  availability: 'A villa that is free for a stretch of nights. State the free dates plainly and put the reader inside one moment of that stay. Calm and inviting, no pressure, no price, no discount.',
   neighbourhood: 'The area around the villa. Use only the area facts provided, never invent places or distances.',
   workation: 'Working from a villa: desk, WiFi, view, longer stays. Only for properties that have a workspace in the facts.',
   book_direct: 'Why booking direct is better: best rate guaranteed, no platform in between, direct contact with the team. No invented discounts.'
@@ -63,4 +64,12 @@ export const COPY_SCHEMA = {
   captions: '{ instagram, facebook, tiktok }. Instagram: 2 to 4 short paragraphs. The first line is a scene or feeling that stops the scroll. The middle invites the reader into the place, with facts only inside the scene and never as a list. The last line is the call to action. Facebook: slightly longer, same warmth, no URL and no mention of the bio. TikTok: one short hook line plus one sentence.',
   hashtags: 'Array of 5 to 8 relevant hashtags for Instagram, without the # sign',
   altTexts: 'Array with one alt text per photo, max 120 characters each, describing only what the photo shows'
+};
+
+// Availability posts are for the Facebook page only: one image, one headline, one caption. The dates come from Elev8.
+export const AVAILABILITY_SCHEMA = {
+  lines: 'Exactly one entry: { headline (max 70 characters, a feeling or image, may carry the free dates), sub (max 60, the villa name and the free dates, for example "The R Villa Luwa · 5 to 12 Dec") }',
+  endCard: 'Leave empty: { title: "", subtitle: "" }',
+  captions: '{ facebook }. Two short paragraphs. The first paints one moment of the stay. The second names the free dates and invites the reader to book direct. No URL and no mention of the bio: the booking link is added automatically.',
+  altTexts: 'Array with one alt text, max 120 characters, describing only what the photo shows'
 };

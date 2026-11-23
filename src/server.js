@@ -10,7 +10,7 @@ import { storageEnabled, uploadFile, openObject } from './storage.js';
 import { verifyMedia } from './media.js';
 import { dbEnabled, migrate, q } from './db.js';
 import { seedProperties } from './seed.js';
-import { planNext } from './planner.js';
+import { planNext, planAvailability } from './planner.js';
 import { resolveAutoRun, noteRun, draftingRoutes } from './drafting.js';
 import { renderPost, listPosts, postView, draftToGhl, setStatus } from './posts.js';
 import { ghlConfigured, listAccounts, listUsers, getStatistics } from './ghl.js';
@@ -138,6 +138,13 @@ const ah = (fn) => (req, res, next) => fn(req, res).catch(next);
 // A call with neither date nor propertyKey is the scheduled run: it only does something when automatic drafting is switched
 // on (see drafting.js), for the day lead days ahead, and it skips a day that already has a post. Otherwise it answers { skipped: true }.
 app.post('/plan/next', needDb, ah(async (req, res) => {
+  // kind "availability": a Facebook post for a villa that is free for a stretch of nights. Manual only, never part of the scheduled run.
+  if (req.body?.kind === 'availability') {
+    const base = req.body?.date ? new Date(`${req.body.date}T00:00:00Z`) : new Date(Date.now() + 8 * 3600 * 1000);
+    if (Number.isNaN(base.getTime())) throw new HttpError(400, 'date must be YYYY-MM-DD');
+    const day = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate()));
+    return res.json(await planAvailability(day, { propertyKey: req.body?.propertyKey ? String(req.body.propertyKey) : undefined }));
+  }
   const explicit = Boolean(req.body?.date || req.body?.propertyKey);
   let day;
   if (!explicit) {

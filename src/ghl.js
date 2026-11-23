@@ -46,8 +46,14 @@ function summaryFor(platform, copy, post) {
  * Create one GHL Social Planner draft per connected platform.
  * Accounts come from GHL_ACCOUNT_IDS, for example {"instagram":"...","facebook":"...","tiktok":"..."}.
  */
+/** Accounts a post goes to: all connected ones, or only the platforms the plan names (availability posts: Facebook only). */
+export function accountsFor(post, acc) {
+  const only = Array.isArray(post?.plan?.platforms) && post.plan.platforms.length ? new Set(post.plan.platforms) : null;
+  return Object.fromEntries(Object.entries(acc || {}).filter(([platform]) => !only || only.has(platform)));
+}
+
 export async function createDrafts(post, mediaUrls) {
-  const acc = accounts();
+  const acc = accountsFor(post, accounts());
   const isVideo = post.media?.type === 'video';
   const type = post.format === 'reel' ? 'reel' : post.format === 'story' ? 'story' : 'post';
   const results = {};

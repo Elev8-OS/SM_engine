@@ -4,7 +4,7 @@ import { compareRoutes } from './compare-sources.js';
 
 // Automatic villa and category for Instagram posts that did not come out of the engine (older or manual posts).
 // Villa: found by name in the caption and hashtags. Category: a small model call, with simple rules as the fallback.
-export const PILLAR_KEYS = ['villa_spotlight', 'villa_angles', 'which_villa_for', 'design_details', 'neighbourhood', 'workation', 'book_direct', 'other'];
+export const PILLAR_KEYS = ['villa_spotlight', 'villa_angles', 'availability', 'which_villa_for', 'design_details', 'neighbourhood', 'workation', 'book_direct', 'other'];
 
 const shortName = (name) => String(name || '').replace(/^The R (Villa|Apartments?)\s+/i, '').trim().toLowerCase();
 
