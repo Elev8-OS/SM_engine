@@ -115,6 +115,7 @@ export function featuresOf(r) {
     hour: hour < 11 ? 'morning' : hour < 15 ? 'midday' : hour < 19 ? 'afternoon' : 'evening',
     question: /\?/.test(first) ? 'yes' : 'no',
     emoji: /\p{Extended_Pictographic}/u.test(first) ? 'yes' : 'no',
+    hookType: r.hook_type || null,
     captionLength: bare.length < 300 ? 'short' : bare.length <= 600 ? 'medium' : 'long',
     hashtags: tags <= 5 ? 'few' : tags <= 10 ? 'normal' : 'many'
   };
@@ -131,6 +132,7 @@ const DIMENSIONS = [
   { dimension: 'hashtags' },
   { dimension: 'source', onlyValues: ['engine'] },
   { dimension: 'pillar', engineOnly: true },
+  { dimension: 'hookType', engineOnly: true },
   { dimension: 'villa', engineOnly: true }
 ];
 
@@ -190,7 +192,7 @@ async function loadPosts() {
   const rows = await q(
     `select i.media_id, i.post_id, i.product_type, i.media_type, i.caption, i.posted_at,
             i.reach, i.likes, i.comments, i.saved, i.shares, i.profile_visits, i.follows,
-            p.format, p.pillar, p.property_key,
+            p.format, p.pillar, p.property_key, p.copy->>'hookType' as hook_type,
             (select count(*)::int from clicks c where c.post_id = i.post_id and not c.is_bot) as clicks,
             s.reach as s_reach, s.likes as s_likes, s.comments as s_comments, s.saved as s_saved, s.shares as s_shares, s.profile_visits as s_pv, s.follows as s_follows
        from post_insights i
